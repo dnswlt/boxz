@@ -109,6 +109,8 @@ func Parse(filename string, r io.Reader) (*Document, error) {
 		}
 		doc.Edges = append(doc.Edges, edge)
 	}
+	// Planning here makes topology and side errors parse-time errors rather than
+	// failures that depend on a later choice of rendering dimensions.
 	if _, err := buildRoutingPlan(doc); err != nil {
 		return nil, err
 	}
@@ -201,6 +203,8 @@ func parseSide(filename string, pos lexer.Position, raw *string) (*Side, error) 
 }
 
 func allowedSides(node *Element) [2]Side {
+	// A node enters the channel system owned by its immediate parent. Hboxes
+	// expose their children vertically; vboxes expose them horizontally.
 	if node.Parent == nil || node.Parent.Kind == KindHBox {
 		return [2]Side{North, South}
 	}

@@ -53,12 +53,16 @@ geometry is calculated.
 For other edges, an `hbox` owns north and south outer channels while a `vbox`
 owns west and east outer channels. Nested containers connect to their parents
 through orthogonal risers. These routes minimize geometric distance, then bends,
-then prior channel use; declaration order breaks remaining ties.
+then prior channel use. Fixed side and adjacency ordering break remaining ties;
+edge declaration order determines which routes contribute prior channel use.
 
 Containers are structural, but are currently drawn with light dashed boundaries
 to make the layout and routing topology easier to debug.
 
 Go-style line and block comments are accepted.
+
+See [docs/architecture.md](docs/architecture.md) for the layout and routing
+model, phase boundaries, and invariants.
 
 ## Current scope
 

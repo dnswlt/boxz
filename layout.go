@@ -55,6 +55,7 @@ type rect struct {
 func (r rect) center() point { return point{X: r.X + r.W/2, Y: r.Y + r.H/2} }
 
 type channel struct {
+	// A and B are the channel center line. Lanes are parallel display offsets.
 	ID string
 	A  point
 	B  point
@@ -75,6 +76,8 @@ type layout struct {
 	Height   float64
 }
 
+// measured is the bottom-up size of an element. Container side fields are the
+// channel bands reserved inside its rectangle; gaps reserve sibling seams.
 type measured struct {
 	element  *Element
 	w        float64
@@ -87,6 +90,8 @@ type measured struct {
 	left     float64
 }
 
+// buildLayout separates bottom-up measurement from top-down placement so child
+// order and alignment never depend on traversal side effects.
 func buildLayout(doc *Document, cfg Config, laneCounts map[string]int, plan *routingPlan) (*layout, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -122,6 +127,8 @@ func validateConfig(cfg Config) error {
 	return nil
 }
 
+// measureElement reserves node ports, sibling seams, and outer channel bands in
+// a bottom-up pass.
 func measureElement(element *Element, cfg Config, lanes map[string]int, plan *routingPlan) *measured {
 	m := &measured{element: element}
 	if element.Kind == KindNode {
@@ -130,6 +137,9 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		ports := plan.PortCount[element.ID]
 		north, east := ports[North], ports[East]
 		south, west := ports[South], ports[West]
+		// Seam sides are known exactly. An outer route chooses one of the two
+		// parent-facing sides later, so reserve its degree on both. This may
+		// overestimate node size, but can never leave too little port space.
 		outer := plan.OuterDegree[element.ID]
 		sides := allowedSides(element)
 		if sides[0] == North {
@@ -194,6 +204,8 @@ func seamBand(cfg Config, lanes int) float64 {
 	return math.Max(cfg.ChildGap, needed)
 }
 
+// placeElement turns measured sizes into absolute rectangles and channel center
+// lines while preserving child order.
 func placeElement(m *measured, x, y float64, cfg Config, result *layout) *placement {
 	p := &placement{
 		Element:  m.element,

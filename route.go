@@ -23,6 +23,8 @@ type graphEdge struct {
 }
 
 type routeGraph struct {
+	// points and adj form the rectilinear graph; ports select legal endpoint
+	// vertices for each node side.
 	points []point
 	adj    [][]graphEdge
 	ports  map[string]map[Side]int
@@ -47,12 +49,17 @@ type routedEdge struct {
 }
 
 type routeResult struct {
-	Edges       []*routedEdge
-	LaneCounts  map[string]int
+	Edges      []*routedEdge
+	LaneCounts map[string]int
+	// LaneByEdge and ChannelUses together turn center-line routes into parallel
+	// display lanes after routing is complete.
 	LaneByEdge  map[int]map[string]int
 	ChannelUses map[string][]int
 }
 
+// routeDocument routes in source order. Earlier outer routes contribute to the
+// congestion tie-breaker for later ones; seam routes are already fixed by the
+// topology plan and do not consume outer-channel lanes.
 func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*routeResult, error) {
 	graph, err := makeRouteGraph(l)
 	if err != nil {
@@ -100,6 +107,8 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 	return result, nil
 }
 
+// routeThroughSeam projects both endpoints to their shared sibling gap and
+// joins them with one segment along the gap.
 func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg Config) (*routedEdge, error) {
 	parent := l.ByID[spec.ParentID]
 	if parent == nil || spec.FirstChild+1 >= len(parent.Children) {
@@ -111,6 +120,8 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg 
 		fromRoot, toRoot = second, first
 	}
 
+	// Each exposure path projects a nested endpoint outward through its
+	// containers. The one cross-seam segment then joins their terminal points.
 	fromPath, ok := exposurePath(fromRoot, l.ByID[edge.From].Element, spec.FromSide)
 	if !ok {
 		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", edge.From, spec.FromSide)
@@ -144,6 +155,8 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg 
 	}, nil
 }
 
+// exposurePath projects a frontier node through every enclosing rectangle up
+// to root's requested side.
 func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 	if root.Element.Kind == KindNode {
 		if root.Element != node {
@@ -162,6 +175,9 @@ func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 		}
 	}
 
+	// Follow the unique containing child and extend its path to this container's
+	// matching channel, or to the rectangle boundary when that side has no
+	// channel of its own.
 	var child *placement
 	for _, candidate := range root.Children {
 		if containsElement(candidate.Element, node) {
@@ -202,7 +218,11 @@ func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 	return points, true
 }
 
+// makeRouteGraph splits channel center lines and hierarchy risers at every
+// intersection, producing the graph searched by outer routes.
 func makeRouteGraph(l *layout) (*routeGraph, error) {
+	// Center lines are sufficient for path finding. Physical lane offsets are a
+	// display concern applied only after every route and lane count is known.
 	var segments []segment
 	for _, channelName := range sortedChannelIDs(l.Channels) {
 		c := l.Channels[channelName]
@@ -211,6 +231,8 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 	ports := make(map[string]map[Side]point)
 	addHierarchySegments(l.Root, &segments, ports)
 
+	// Split every segment at all crossings and overlaps. Shared coordinates then
+	// become graph vertices at which a route may turn or change hierarchy level.
 	pointsBySegment := make([][]point, len(segments))
 	for index, s := range segments {
 		if s.A == s.B {
@@ -286,10 +308,15 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 	return graph, nil
 }
 
+// addHierarchySegments connects child boundary portals to the channels owned by
+// each parent and records node portals as legal endpoints.
 func addHierarchySegments(parent *placement, segments *[]segment, ports map[string]map[Side]point) {
 	if parent.Element.Kind == KindNode {
 		return
 	}
+	// A riser connects every exposed child portal to each channel owned by the
+	// parent. Recursing builds a connected channel hierarchy without allowing
+	// the router to cross node interiors arbitrarily.
 	for _, child := range parent.Children {
 		if parent.Element.Kind == KindHBox {
 			for _, side := range []Side{North, South} {
@@ -325,6 +352,8 @@ func setPort(ports map[string]map[Side]point, nodeID string, side Side, p point)
 	ports[nodeID][side] = p
 }
 
+// boundaryPortals returns the points through which a child can meet a parent
+// channel on side.
 func boundaryPortals(child *placement, side Side) []point {
 	if child.Element.Kind == KindNode {
 		center := child.Rect.center()
@@ -339,6 +368,8 @@ func boundaryPortals(child *placement, side Side) []point {
 			return []point{{X: child.Rect.X + child.Rect.W, Y: center.Y}}
 		}
 	}
+	// Prefer the child's matching channel. When the child owns only orthogonal
+	// channels, their extreme endpoints form the portals on this boundary.
 	if matching := child.Channels[side]; matching != nil {
 		return []point{{X: (matching.A.X + matching.B.X) / 2, Y: (matching.A.Y + matching.B.Y) / 2}}
 	}
@@ -426,6 +457,8 @@ type routeCost struct {
 	congestion int
 }
 
+// less defines the routing policy lexicographically. Distance dominates bends,
+// and bends dominate the weak preference for less-used channels.
 func (c routeCost) less(other routeCost) bool {
 	if c.distance != other.distance {
 		return c.distance < other.distance
@@ -441,6 +474,8 @@ func (c routeCost) equal(other routeCost) bool {
 }
 
 type routeState struct {
+	// Direction belongs in the state because reaching one point horizontally is
+	// not equivalent to reaching it vertically when the next bend has a cost.
 	vertex int
 	dir    direction
 }
@@ -476,6 +511,8 @@ func (q *routeQueue) Pop() any {
 	return item
 }
 
+// shortestRoute searches every legal source side; each search may terminate on
+// any legal destination side.
 func shortestRoute(graph *routeGraph, edge *Edge, edgeIndex int, usage map[string]int) (*routedEdge, error) {
 	fromSides := endpointSides(graph, edge.From, edge.FromSide)
 	toSides := endpointSides(graph, edge.To, edge.ToSide)
@@ -483,6 +520,8 @@ func shortestRoute(graph *routeGraph, edge *Edge, edgeIndex int, usage map[strin
 		return nil, fmt.Errorf("boxz: cannot route edge %s -> %s: endpoint has no channel", edge.From, edge.To)
 	}
 
+	// Side constraints reduce these sets to one. Otherwise, try every legal
+	// source side and let the same cost ordering choose both endpoints.
 	var best *routedEdge
 	var bestCost routeCost
 	for _, fromSide := range fromSides {
@@ -520,6 +559,8 @@ func endpointSides(graph *routeGraph, nodeID string, constrained *Side) []Side {
 	return result
 }
 
+// dijkstra finds the lexicographically cheapest path from start to any target
+// side while retaining incoming direction as part of the state.
 func dijkstra(graph *routeGraph, start int, targetNode string, targetSides []Side, usage map[string]int) (*routedEdge, routeCost, bool) {
 	targetByVertex := make(map[int]Side)
 	for _, side := range targetSides {
@@ -528,6 +569,8 @@ func dijkstra(graph *routeGraph, start int, targetNode string, targetSides []Sid
 	startState := routeState{vertex: start, dir: dirNone}
 	distance := map[routeState]routeCost{startState: {}}
 	previous := make(map[routeState]previousStep)
+	// Adjacency and endpoint sides are sorted before search. The monotonically
+	// increasing order field therefore makes equal-cost selection reproducible.
 	queue := &routeQueue{}
 	heap.Init(queue)
 	order := 0

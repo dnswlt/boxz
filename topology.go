@@ -16,12 +16,18 @@ type seamSpec struct {
 }
 
 type routingPlan struct {
-	Seams         map[int]*seamSpec
+	// Seams maps source edge indexes to routes whose topology is already fixed.
+	Seams map[int]*seamSpec
+	// SeamLaneCount sizes each sibling gap before placement.
 	SeamLaneCount map[string]int
-	PortCount     map[string]map[Side]int
-	OuterDegree   map[string]int
+	// PortCount is exact for seam endpoints; outer endpoints are counted below.
+	PortCount   map[string]map[Side]int
+	OuterDegree map[string]int
 }
 
+// buildRoutingPlan makes every decision that depends only on tree structure.
+// In particular, seam selection must not depend on dimensions that routing may
+// later enlarge.
 func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 	plan := &routingPlan{
 		Seams:         make(map[int]*seamSpec),
@@ -58,6 +64,8 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 	return plan, nil
 }
 
+// classifySeam returns a direct sibling-seam route when both endpoints are on
+// the required recursive frontiers.
 func classifySeam(from, to *Element) *seamSpec {
 	if from == nil || to == nil || from == to {
 		return nil
@@ -70,6 +78,8 @@ func classifySeam(from, to *Element) *seamSpec {
 	toChild := childBelow(lca, to)
 	fromIndex := childIndex(lca, fromChild)
 	toIndex := childIndex(lca, toChild)
+	// The endpoints need not be immediate siblings, but their subtrees must be
+	// adjacent at the lowest container that contains both.
 	if fromIndex < 0 || toIndex < 0 || absInt(fromIndex-toIndex) != 1 {
 		return nil
 	}
@@ -92,12 +102,16 @@ func classifySeam(from, to *Element) *seamSpec {
 			spec.FromSide, spec.ToSide = West, East
 		}
 	}
+	// Adjacency alone is insufficient: each node must be visible on the facing
+	// recursive frontier of its subtree.
 	if !onFrontier(fromChild, from, spec.FromSide) || !onFrontier(toChild, to, spec.ToSide) {
 		return nil
 	}
 	return spec
 }
 
+// onFrontier reports whether node is exposed on one side of root according to
+// container order alone; it deliberately performs no geometric visibility test.
 func onFrontier(root, node *Element, side Side) bool {
 	if root == node {
 		return root.Kind == KindNode
@@ -106,6 +120,8 @@ func onFrontier(root, node *Element, side Side) bool {
 		return false
 	}
 
+	// Along a container's stacking axis only the first or last child is exposed.
+	// Perpendicular to that axis, every child's matching frontier is exposed.
 	if root.Kind == KindHBox {
 		switch side {
 		case West:

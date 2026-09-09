@@ -46,11 +46,16 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	return err
 }
 
+// solve alternates layout and routing until every outer channel has enough room
+// for the lanes assigned to it.
 func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 	plan, err := buildRoutingPlan(doc)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Outer-channel demand is only known after routing, while routing needs
+	// channel coordinates. Rebuild until every routed lane fits. Allocations only
+	// grow, which makes the loop monotonic and prevents layout oscillation.
 	allocated := make(map[string]int)
 	for iteration := 0; iteration < len(doc.Edges)*2+4; iteration++ {
 		l, err := buildLayout(doc, cfg, allocated, plan)
@@ -82,6 +87,8 @@ type portKey struct {
 	to   bool
 }
 
+// allocatePorts gives every routed endpoint a distinct, stable point on its
+// chosen node side.
 func allocatePorts(l *layout, routes *routeResult) map[portKey]point {
 	type use struct {
 		edge int
@@ -99,6 +106,8 @@ func allocatePorts(l *layout, routes *routeResult) map[portKey]point {
 		groups[route.To][route.ToSide] = append(groups[route.To][route.ToSide], use{edge: route.EdgeIndex, to: true})
 	}
 
+	// Routing chooses sides, then ports are spread evenly and deterministically
+	// along each side. Measuring reserved enough side length for this count.
 	result := make(map[portKey]point)
 	for nodeID, sides := range groups {
 		placed := l.ByID[nodeID]
@@ -132,12 +141,16 @@ func allocatePorts(l *layout, routes *routeResult) map[portKey]point {
 	return result
 }
 
+// displayRoute converts a center-line graph path to its assigned lane and exact
+// node ports without introducing lane-width jogs.
 func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg Config) []point {
 	type straightRun struct {
 		a          point
 		b          point
 		horizontal bool
 	}
+	// Seam routes already contain their final lane coordinates. Outer routes are
+	// still on channel center lines and need lane and exact-port adjustment.
 	if len(route.Channels) == 0 {
 		return route.Points
 	}
