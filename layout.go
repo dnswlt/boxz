@@ -162,7 +162,7 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		m.children = append(m.children, measureElement(child, cfg, lanes, plan))
 	}
 	for index := 0; index+1 < len(element.Children); index++ {
-		m.gaps = append(m.gaps, seamBand(cfg, plan.SeamLaneCount[seamID(element.ID, index)]))
+		m.gaps = append(m.gaps, seamBand(cfg, plan.SeamTrackCount[seamID(element.ID, index)]))
 	}
 	if element.Kind == KindHBox {
 		m.top = channelBand(cfg, lanes[channelID(element.ID, North)])

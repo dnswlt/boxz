@@ -11,15 +11,19 @@ type seamSpec struct {
 	FirstChild int
 	FromSide   Side
 	ToSide     Side
-	Lane       int
-	LaneCount  int
+	// Tracks are normalized to the parent's first and second child, independent
+	// of edge direction. Different tracks imply a dogleg at DoglegCoordinate.
+	FirstTrack       int
+	SecondTrack      int
+	TrackCount       int
+	DoglegCoordinate float64
 }
 
 type routingPlan struct {
 	// Seams maps source edge indexes to routes whose topology is already fixed.
 	Seams map[int]*seamSpec
-	// SeamLaneCount sizes each sibling gap before placement.
-	SeamLaneCount map[string]int
+	// SeamTrackCount sizes each sibling gap before placement.
+	SeamTrackCount map[string]int
 	// PortCount is exact for seam endpoints; outer endpoints are counted below.
 	PortCount   map[string]map[Side]int
 	OuterDegree map[string]int
@@ -30,10 +34,10 @@ type routingPlan struct {
 // later enlarge.
 func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 	plan := &routingPlan{
-		Seams:         make(map[int]*seamSpec),
-		SeamLaneCount: make(map[string]int),
-		PortCount:     make(map[string]map[Side]int),
-		OuterDegree:   make(map[string]int),
+		Seams:          make(map[int]*seamSpec),
+		SeamTrackCount: make(map[string]int),
+		PortCount:      make(map[string]map[Side]int),
+		OuterDegree:    make(map[string]int),
 	}
 	nodes := make(map[string]*Element)
 	collectNodes(doc.Root, nodes)
@@ -41,8 +45,9 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 	for edgeIndex, edge := range doc.Edges {
 		spec := classifySeam(nodes[edge.From], nodes[edge.To])
 		if spec != nil && constraintsAllowSeam(edge, spec) {
-			spec.Lane = plan.SeamLaneCount[spec.ID]
-			plan.SeamLaneCount[spec.ID]++
+			spec.FirstTrack = plan.SeamTrackCount[spec.ID]
+			spec.SecondTrack = spec.FirstTrack
+			plan.SeamTrackCount[spec.ID]++
 			plan.Seams[edgeIndex] = spec
 			incrementPort(plan.PortCount, edge.From, spec.FromSide)
 			incrementPort(plan.PortCount, edge.To, spec.ToSide)
@@ -59,7 +64,7 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 		plan.OuterDegree[edge.To]++
 	}
 	for _, spec := range plan.Seams {
-		spec.LaneCount = plan.SeamLaneCount[spec.ID]
+		spec.TrackCount = plan.SeamTrackCount[spec.ID]
 	}
 	return plan, nil
 }

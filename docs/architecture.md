@@ -11,8 +11,9 @@ source -> syntax tree -> routing plan -> measure/place <-> route -> SVG
 ```
 
 The double arrow is a bounded fixed-point calculation: routing discovers how
-many lanes each outer channel needs, and layout grows those channels before
-routing again. Sizes only grow, so a stable result does not oscillate.
+many lanes each outer channel and cyclic seam needs, and layout grows that
+routing space before trying again. Sizes only grow, so a stable result does not
+oscillate.
 
 ## Model
 
@@ -56,6 +57,23 @@ or column without a visibility calculation.
 `topology.go` performs this classification before geometry exists. The result
 also records exact seam port counts and conservative outer-route degrees so
 node measurement can reserve enough perimeter for ports.
+
+### Seam-local track assignment
+
+The eligible seam and its endpoint sides are topological, but track order is
+assigned after placement because collisions depend on exact port alignment.
+Each seam is solved independently as a small channel-routing problem.
+
+For a vertical seam, an upper access leg and a lower access leg at the same X
+coordinate impose an ordering constraint: the upper edge's track must be above
+the lower edge's track. Horizontal seams use the transposed rule. A stable
+topological sort provides the track order when these constraints are acyclic.
+
+A constraint cycle cannot use one track per edge without an overlapping access
+leg. In that case, the seam uses two banks: all first-child tracks, then all
+second-child tracks. Each edge changes banks at a private dogleg coordinate.
+Only this seam grows to fit the additional tracks; the surrounding layout and
+node order remain unchanged.
 
 ## Measurement and placement
 
@@ -108,6 +126,7 @@ orthogonal projection and removes duplicate or redundant collinear points.
 - Routing may grow geometry, never reorder it.
 - Seam classification depends only on the element tree and explicit side
   constraints.
+- Seam track ordering depends only on final port alignment within that seam.
 - All route segments are horizontal or vertical.
 - Channel allocation grows monotonically until stable.
 - Iteration over maps must not affect rendered output.

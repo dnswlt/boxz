@@ -108,41 +108,66 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 }
 
 // routeThroughSeam projects both endpoints to their shared sibling gap and
-// joins them with one segment along the gap.
+// joins them on one track, or on two tracks connected by a local dogleg.
 func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg Config) (*routedEdge, error) {
 	parent := l.ByID[spec.ParentID]
 	if parent == nil || spec.FirstChild+1 >= len(parent.Children) {
 		return nil, fmt.Errorf("boxz: internal routing error: seam %q is missing", spec.ID)
 	}
 	first, second := parent.Children[spec.FirstChild], parent.Children[spec.FirstChild+1]
-	fromRoot, toRoot := first, second
-	if !containsElement(first.Element, l.ByID[edge.From].Element) {
-		fromRoot, toRoot = second, first
+	fromInFirst := containsElement(first.Element, l.ByID[edge.From].Element)
+	firstNode, secondNode := l.ByID[edge.From].Element, l.ByID[edge.To].Element
+	firstSide, secondSide := spec.FromSide, spec.ToSide
+	if !fromInFirst {
+		firstNode, secondNode = secondNode, firstNode
+		firstSide, secondSide = secondSide, firstSide
 	}
 
 	// Each exposure path projects a nested endpoint outward through its
-	// containers. The one cross-seam segment then joins their terminal points.
-	fromPath, ok := exposurePath(fromRoot, l.ByID[edge.From].Element, spec.FromSide)
+	// containers. The seam tracks then join their terminal points.
+	firstPath, ok := exposurePath(first, firstNode, firstSide)
 	if !ok {
-		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", edge.From, spec.FromSide)
+		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", firstNode.ID, firstSide)
 	}
-	toPath, ok := exposurePath(toRoot, l.ByID[edge.To].Element, spec.ToSide)
+	secondPath, ok := exposurePath(second, secondNode, secondSide)
 	if !ok {
-		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", edge.To, spec.ToSide)
+		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", secondNode.ID, secondSide)
 	}
 
-	laneOffset := (float64(spec.Lane) - float64(spec.LaneCount-1)/2) * cfg.LaneSpacing
-	fromEnd, toEnd := fromPath[len(fromPath)-1], toPath[len(toPath)-1]
-	points := append([]point(nil), fromPath...)
+	firstOffset := trackOffset(spec.FirstTrack, spec.TrackCount, cfg.LaneSpacing)
+	secondOffset := trackOffset(spec.SecondTrack, spec.TrackCount, cfg.LaneSpacing)
+	firstEnd, secondEnd := firstPath[len(firstPath)-1], secondPath[len(secondPath)-1]
+	points := append([]point(nil), firstPath...)
 	if parent.Element.Kind == KindVBox {
-		seamY := (first.Rect.Y+first.Rect.H+second.Rect.Y)/2 + laneOffset
-		points = append(points, point{X: fromEnd.X, Y: seamY}, point{X: toEnd.X, Y: seamY})
+		seamCenter := (first.Rect.Y + first.Rect.H + second.Rect.Y) / 2
+		firstY, secondY := seamCenter+firstOffset, seamCenter+secondOffset
+		points = append(points, point{X: firstEnd.X, Y: firstY})
+		if spec.FirstTrack == spec.SecondTrack {
+			points = append(points, point{X: secondEnd.X, Y: firstY})
+		} else {
+			points = append(points,
+				point{X: spec.DoglegCoordinate, Y: firstY},
+				point{X: spec.DoglegCoordinate, Y: secondY},
+				point{X: secondEnd.X, Y: secondY})
+		}
 	} else {
-		seamX := (first.Rect.X+first.Rect.W+second.Rect.X)/2 + laneOffset
-		points = append(points, point{X: seamX, Y: fromEnd.Y}, point{X: seamX, Y: toEnd.Y})
+		seamCenter := (first.Rect.X + first.Rect.W + second.Rect.X) / 2
+		firstX, secondX := seamCenter+firstOffset, seamCenter+secondOffset
+		points = append(points, point{X: firstX, Y: firstEnd.Y})
+		if spec.FirstTrack == spec.SecondTrack {
+			points = append(points, point{X: firstX, Y: secondEnd.Y})
+		} else {
+			points = append(points,
+				point{X: firstX, Y: spec.DoglegCoordinate},
+				point{X: secondX, Y: spec.DoglegCoordinate},
+				point{X: secondX, Y: secondEnd.Y})
+		}
 	}
-	reverse(toPath)
-	points = append(points, toPath...)
+	reverse(secondPath)
+	points = append(points, secondPath...)
+	if !fromInFirst {
+		reverse(points)
+	}
 	points = simplifyPoints(points)
 	return &routedEdge{
 		EdgeIndex: edgeIndex,
@@ -153,6 +178,25 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg 
 		Points:    points,
 		Channels:  make([]string, maxInt(0, len(points)-1)),
 	}, nil
+}
+
+func trackOffset(track, count int, spacing float64) float64 {
+	return (float64(track) - float64(count-1)/2) * spacing
+}
+
+func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, cfg Config) error {
+	for index, route := range routes.Edges {
+		spec := plan.Seams[route.EdgeIndex]
+		if spec == nil {
+			continue
+		}
+		rebuilt, err := routeThroughSeam(l, doc.Edges[route.EdgeIndex], route.EdgeIndex, spec, cfg)
+		if err != nil {
+			return err
+		}
+		routes.Edges[index] = rebuilt
+	}
+	return nil
 }
 
 // exposurePath projects a frontier node through every enclosing rectangle up

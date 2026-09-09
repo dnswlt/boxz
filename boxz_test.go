@@ -75,7 +75,7 @@ edge b -> c
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := plan.SeamLaneCount[seamID("root", 1)]; got != 2 {
+	if got := plan.SeamTrackCount[seamID("root", 1)]; got != 2 {
 		t.Fatalf("seam lane count = %d, want 2", got)
 	}
 	l, routes, err := solve(doc, DefaultConfig())
@@ -306,6 +306,110 @@ edge api -> exportService
 	}
 }
 
+func TestSeamTrackOrderAvoidsAlignedAccessOverlap(t *testing.T) {
+	doc, err := ParseString("aligned.boxz", `
+vbox root {
+  hbox services {
+    node client "A"
+    node api "A"
+  }
+  hbox infra {
+    node database "A"
+    node cacheServer "A"
+  }
+  hbox export {
+    node exportService "A"
+  }
+}
+edge client -> api
+edge api -> database
+edge api -> exportService
+edge client -> cacheServer
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrthogonalPaths(t, output.String())
+	assertNoCollinearEdgeOverlaps(t, output.String())
+}
+
+func TestCyclicSeamConstraintsUseDoglegs(t *testing.T) {
+	tests := map[string]string{
+		"vertical forward": `
+vbox root {
+  hbox upper {
+    node a "A"
+    node b "A"
+  }
+  hbox lower {
+    node c "A"
+    node d "A"
+  }
+}
+edge a -> d
+edge b -> c
+`,
+		"horizontal reverse": `
+hbox root {
+  vbox left {
+    node a "A"
+    node b "A"
+  }
+  vbox right {
+    node c "A"
+    node d "A"
+  }
+}
+edge d -> a
+edge c -> b
+`,
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			doc, err := ParseString("cyclic.boxz", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := buildRoutingPlan(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := routeDocument(doc, l, plan, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !grew {
+				t.Fatal("cyclic seam did not request additional dogleg tracks")
+			}
+			for edgeIndex := range doc.Edges {
+				spec := plan.Seams[edgeIndex]
+				if spec.TrackCount != 4 || spec.FirstTrack == spec.SecondTrack {
+					t.Fatalf("edge %d seam = %#v, want two-bank dogleg in four tracks", edgeIndex, spec)
+				}
+			}
+
+			var output bytes.Buffer
+			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+				t.Fatal(err)
+			}
+			assertOrthogonalPaths(t, output.String())
+			assertNoCollinearEdgeOverlaps(t, output.String())
+		})
+	}
+}
+
 var pathPattern = regexp.MustCompile(`<path class="boxz-edge"[^>]* d="([^"]+)"`)
 var coordinatePattern = regexp.MustCompile(`(?:M|L) ([0-9.]+) ([0-9.]+)`)
 
@@ -327,6 +431,53 @@ func assertOrthogonalPaths(t *testing.T, svg string) {
 			}
 		}
 	}
+}
+
+func assertNoCollinearEdgeOverlaps(t *testing.T, svg string) {
+	t.Helper()
+	paths := pathPattern.FindAllStringSubmatch(svg, -1)
+	for left := range paths {
+		leftPoints := coordinatePattern.FindAllStringSubmatch(paths[left][1], -1)
+		for right := left + 1; right < len(paths); right++ {
+			rightPoints := coordinatePattern.FindAllStringSubmatch(paths[right][1], -1)
+			for leftSegment := 1; leftSegment < len(leftPoints); leftSegment++ {
+				lx1, _ := strconv.ParseFloat(leftPoints[leftSegment-1][1], 64)
+				ly1, _ := strconv.ParseFloat(leftPoints[leftSegment-1][2], 64)
+				lx2, _ := strconv.ParseFloat(leftPoints[leftSegment][1], 64)
+				ly2, _ := strconv.ParseFloat(leftPoints[leftSegment][2], 64)
+				for rightSegment := 1; rightSegment < len(rightPoints); rightSegment++ {
+					rx1, _ := strconv.ParseFloat(rightPoints[rightSegment-1][1], 64)
+					ry1, _ := strconv.ParseFloat(rightPoints[rightSegment-1][2], 64)
+					rx2, _ := strconv.ParseFloat(rightPoints[rightSegment][1], 64)
+					ry2, _ := strconv.ParseFloat(rightPoints[rightSegment][2], 64)
+					verticalOverlap := lx1 == lx2 && rx1 == rx2 && lx1 == rx1 &&
+						intervalOverlap(ly1, ly2, ry1, ry2) > 1e-9
+					horizontalOverlap := ly1 == ly2 && ry1 == ry2 && ly1 == ry1 &&
+						intervalOverlap(lx1, lx2, rx1, rx2) > 1e-9
+					if verticalOverlap || horizontalOverlap {
+						t.Fatalf("collinear overlap between paths %q and %q", paths[left][1], paths[right][1])
+					}
+				}
+			}
+		}
+	}
+}
+
+func intervalOverlap(a1, a2, b1, b2 float64) float64 {
+	if a1 > a2 {
+		a1, a2 = a2, a1
+	}
+	if b1 > b2 {
+		b1, b2 = b2, b1
+	}
+	left, right := a1, a2
+	if b1 > left {
+		left = b1
+	}
+	if b2 < right {
+		right = b2
+	}
+	return right - left
 }
 
 func abs(value float64) float64 {

@@ -50,6 +50,10 @@ reach every exposed node on the other, even through nested containers. Seam
 routing takes precedence over outer channels and fixes the endpoint sides before
 geometry is calculated.
 
+Within each seam, exact port alignment determines track order so opposing
+access legs do not overlap. Cyclic ordering constraints are resolved locally
+with doglegs and additional seam tracks; nodes remain fixed.
+
 For other edges, an `hbox` owns north and south outer channels while a `vbox`
 owns west and east outer channels. Nested containers connect to their parents
 through orthogonal risers. These routes minimize geometric distance, then bends,

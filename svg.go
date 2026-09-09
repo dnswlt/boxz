@@ -46,15 +46,15 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	return err
 }
 
-// solve alternates layout and routing until every outer channel has enough room
-// for the lanes assigned to it.
+// solve alternates layout and routing until every outer channel and sibling
+// seam has enough room for the tracks assigned to it.
 func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 	plan, err := buildRoutingPlan(doc)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Outer-channel demand is only known after routing, while routing needs
-	// channel coordinates. Rebuild until every routed lane fits. Allocations only
+	// Outer-channel and cyclic-seam demand is only known after routing, while
+	// routing needs coordinates. Rebuild until every track fits. Allocations only
 	// grow, which makes the loop monotonic and prevents layout oscillation.
 	allocated := make(map[string]int)
 	for iteration := 0; iteration < len(doc.Edges)*2+4; iteration++ {
@@ -73,11 +73,20 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 				grew = true
 			}
 		}
+		ports := allocatePorts(l, routes)
+		seamGrew, err := assignSeamTracks(doc, l, plan, ports, cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		grew = grew || seamGrew
 		if !grew {
+			if err := rerouteSeams(doc, l, plan, routes, cfg); err != nil {
+				return nil, nil, err
+			}
 			return l, routes, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("boxz: channel sizing did not converge")
+	return nil, nil, fmt.Errorf("boxz: routing-space sizing did not converge")
 }
 
 type portKey struct {
@@ -149,11 +158,12 @@ func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]poin
 		b          point
 		horizontal bool
 	}
-	// Seam routes already contain their final lane coordinates. Outer routes are
-	// still on channel center lines and need lane and exact-port adjustment.
 	if len(route.Channels) == 0 {
 		return route.Points
 	}
+	// Seam routes already contain final track coordinates and therefore have
+	// empty channel tags. Named outer-channel runs still need lane offsets. Both
+	// route kinds need projection from center-line geometry to exact node ports.
 
 	// A route can cross from a channel into a collinear hierarchy riser. Offset
 	// the whole straight run as one unit; offsetting its graph segments
