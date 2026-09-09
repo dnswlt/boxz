@@ -14,8 +14,10 @@ vbox root {
   node database
 }
 
-edge client -> api
-edge api -> database
+edges {
+  client -> api
+  api -> database
+}
 ```
 
 Render it with:
@@ -26,16 +28,17 @@ go run ./cmd/boxz -o diagram.svg examples/basic.boxz
 
 ## Language
 
-There must be exactly one root element, followed by zero or more edges. Source
-order is layout order.
+There must be exactly one root element, followed by an optional `edges` block.
+Source order is layout and edge-routing order.
 
 ```text
-document  = element edge*
+document  = element edges?
 element   = node | hbox | vbox
 node      = "node" identifier string?
 hbox      = "hbox" identifier "{" element+ "}"
 vbox      = "vbox" identifier "{" element+ "}"
-edge      = "edge" endpoint "->" endpoint
+edges     = "edges" "{" edge* "}"
+edge      = endpoint "->" endpoint
 endpoint  = identifier (":" side)?
 side      = "N" | "E" | "S" | "W"
 ```

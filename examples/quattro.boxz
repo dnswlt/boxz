@@ -9,5 +9,7 @@ vbox root {
   }
 }
 
-edge a1 -> b2
-edge a2 -> b1
+edges {
+  a1 -> b2
+  a2 -> b1
+}

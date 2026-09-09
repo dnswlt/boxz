@@ -16,8 +16,10 @@ vbox root {
   }
   node database
 }
-edge client -> api
-edge api -> database
+edges {
+  client -> api
+  api -> database
+}
 `
 
 func TestParsePreservesOrderAndDefaultsTitle(t *testing.T) {
@@ -37,12 +39,15 @@ func TestParsePreservesOrderAndDefaultsTitle(t *testing.T) {
 	if got := doc.Root.Children[1].Title; got != "database" {
 		t.Fatalf("default title = %q, want database", got)
 	}
+	if len(doc.Edges) != 2 || doc.Edges[0].From != "client" || doc.Edges[1].From != "api" {
+		t.Fatalf("edges = %#v, want source order preserved", doc.Edges)
+	}
 }
 
 func TestParseEndpointSides(t *testing.T) {
 	source := `// constrained ports
 hbox root { node a node b }
-edge a:N -> b:S`
+edges { a:N -> b:S }`
 	doc, err := ParseString("sides.boxz", source)
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +60,17 @@ edge a:N -> b:S`
 	}
 }
 
+func TestParseAllowsEmptyEdgesBlock(t *testing.T) {
+	doc, err := ParseString("empty-edges.boxz", `node root
+edges {}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Edges) != 0 {
+		t.Fatalf("edges = %#v, want none", doc.Edges)
+	}
+}
+
 func TestMultipleEdgesAllocateChannelLanesAndPorts(t *testing.T) {
 	source := `
 hbox root {
@@ -63,9 +79,11 @@ hbox root {
   node c
   node d
 }
-edge a -> d
-edge b -> c
-edge b -> c
+edges {
+  a -> d
+  b -> c
+  b -> c
+}
 `
 	doc, err := ParseString("lanes.boxz", source)
 	if err != nil {
@@ -145,7 +163,7 @@ vbox root {
     }
   }
 }
-edge b -> e
+edges { b -> e }
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -187,9 +205,17 @@ func TestParseRejectsNodeBodyAndEmptyContainer(t *testing.T) {
 
 func TestParseRejectsImpossibleSide(t *testing.T) {
 	_, err := ParseString("side.boxz", `hbox root { node a node b node c }
-edge a:E -> c`)
+edges { a:E -> c }`)
 	if err == nil || !strings.Contains(err.Error(), "side E is not available") {
 		t.Fatalf("error = %v, want unavailable side diagnostic", err)
+	}
+}
+
+func TestParseRejectsLegacyEdgeKeyword(t *testing.T) {
+	_, err := ParseString("legacy.boxz", `hbox root { node a node b }
+edge a -> b`)
+	if err == nil {
+		t.Fatal("legacy edge declaration succeeded, want an edges block")
 	}
 }
 
@@ -235,8 +261,10 @@ hbox outer {
     node d
   }
 }
-edge a -> d
-edge b -> c
+edges {
+  a -> d
+  b -> c
+}
 `
 	doc, err := ParseString("nested.boxz", source)
 	if err != nil {
@@ -264,9 +292,11 @@ vbox root {
     node exportService
   }
 }
-edge client -> api
-edge api -> database
-edge api -> exportService
+edges {
+  client -> api
+  api -> database
+  api -> exportService
+}
 `
 	doc, err := ParseString("double.boxz", source)
 	if err != nil {
@@ -321,10 +351,12 @@ vbox root {
     node exportService "A"
   }
 }
-edge client -> api
-edge api -> database
-edge api -> exportService
-edge client -> cacheServer
+edges {
+  client -> api
+  api -> database
+  api -> exportService
+  client -> cacheServer
+}
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -350,8 +382,10 @@ vbox root {
     node d "A"
   }
 }
-edge a -> d
-edge b -> c
+edges {
+  a -> d
+  b -> c
+}
 `,
 		"horizontal reverse": `
 hbox root {
@@ -364,8 +398,10 @@ hbox root {
     node d "A"
   }
 }
-edge d -> a
-edge c -> b
+edges {
+  d -> a
+  c -> b
+}
 `,
 	}
 	for name, source := range tests {

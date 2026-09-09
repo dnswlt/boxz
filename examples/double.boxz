@@ -12,7 +12,9 @@ vbox root {
   }
 }
 
-edge client -> api
-edge api -> database
-edge api -> exportService
-edge client -> cacheServer
+edges {
+  client -> api
+  api -> database
+  api -> exportService
+  client -> cacheServer
+}

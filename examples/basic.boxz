@@ -7,5 +7,7 @@ vbox root {
   node database
 }
 
-edge client -> api
-edge api -> database
+edges {
+  client -> api
+  api -> database
+}

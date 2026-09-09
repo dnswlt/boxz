@@ -54,8 +54,8 @@ type Edge struct {
 }
 
 type syntaxDocument struct {
-	Root  *syntaxElement `parser:"@@"`
-	Edges []*syntaxEdge  `parser:"@@*"`
+	Root      *syntaxElement   `parser:"@@"`
+	EdgeBlock *syntaxEdgeBlock `parser:"@@?"`
 }
 
 type syntaxElement struct {
@@ -70,9 +70,13 @@ type syntaxBody struct {
 	Children []*syntaxElement `parser:"'{' @@* '}'"`
 }
 
+type syntaxEdgeBlock struct {
+	Edges []*syntaxEdge `parser:"'edges' '{' @@* '}'"`
+}
+
 type syntaxEdge struct {
 	Pos  lexer.Position
-	From *syntaxEndpoint `parser:"'edge' @@"`
+	From *syntaxEndpoint `parser:"@@"`
 	To   *syntaxEndpoint `parser:"'-' '>' @@"`
 }
 
@@ -102,7 +106,11 @@ func Parse(filename string, r io.Reader) (*Document, error) {
 
 	nodes := make(map[string]*Element)
 	collectNodes(doc.Root, nodes)
-	for _, raw := range parsed.Edges {
+	var parsedEdges []*syntaxEdge
+	if parsed.EdgeBlock != nil {
+		parsedEdges = parsed.EdgeBlock.Edges
+	}
+	for _, raw := range parsedEdges {
 		edge, edgeErr := convertEdge(filename, raw, nodes)
 		if edgeErr != nil {
 			return nil, edgeErr
