@@ -1,0 +1,11 @@
+vbox root {
+  hbox services {
+    node client "Client"
+    node api "API Server"
+  }
+
+  node database
+}
+
+edge client -> api
+edge api -> database

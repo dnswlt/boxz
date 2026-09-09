@@ -1,0 +1,18 @@
+vbox root {
+  hbox services {
+    node client "Client"
+    node api "API Server"
+  }
+  hbox infra {
+    node database
+    node cacheServer
+  }
+  hbox export {
+    node exportService
+  }
+}
+
+edge client -> api
+edge api -> database
+edge api -> exportService
+edge client -> cacheServer
