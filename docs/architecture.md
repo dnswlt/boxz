@@ -141,6 +141,15 @@ adjacent collinear riser would create a small, meaningless jog.
 The final path reconnects each offset run to its exact node port with one
 orthogonal projection and removes duplicate or redundant collinear points.
 
+## Debug rendering
+
+Debug rendering is an SVG-only view of the same solved geometry; it never
+changes measurement or routing. It draws structural container rectangles, all
+center-line graph segments, and exact allocated endpoint ports behind or above
+the normal diagram as appropriate. Channels, unnamed hierarchy risers, and
+sibling crossbars use distinct classes and colors. Named resources also carry
+`data-resource` attributes for inspection.
+
 ## Invariants worth preserving
 
 - Source order determines node order.

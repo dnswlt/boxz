@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// RenderSVG lays out and renders a parsed document as a standalone SVG.
+// RenderSVG lays out and renders a parsed document as a standalone SVG. Set
+// cfg.Debug to include structural and routing diagnostics.
 func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	l, routes, err := solve(doc, cfg)
 	if err != nil {
@@ -24,14 +25,27 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	svg.WriteString("      <path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"#475569\"/>\n")
 	svg.WriteString("    </marker>\n")
 	svg.WriteString("    <style>\n")
-	svg.WriteString("      .boxz-container { fill: none; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 4 4; }\n")
 	svg.WriteString("      .boxz-node { fill: #ffffff; stroke: #334155; stroke-width: 1.5; }\n")
 	svg.WriteString("      .boxz-title { fill: #0f172a; font: 14px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }\n")
 	svg.WriteString("      .boxz-edge { fill: none; stroke: #475569; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; marker-end: url(#arrow); }\n")
+	if cfg.Debug {
+		svg.WriteString("      .boxz-container { fill: none; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 4 4; }\n")
+		svg.WriteString("      .boxz-debug-route { fill: none; stroke-width: 1; stroke-linecap: round; opacity: 0.55; }\n")
+		svg.WriteString("      .boxz-debug-channel { stroke: #0ea5e9; stroke-dasharray: 5 3; }\n")
+		svg.WriteString("      .boxz-debug-riser { stroke: #8b5cf6; stroke-dasharray: 2 3; }\n")
+		svg.WriteString("      .boxz-debug-crossbar { stroke: #f59e0b; stroke-dasharray: 2 2; }\n")
+		svg.WriteString("      .boxz-debug-used { opacity: 0.9; stroke-width: 1.5; }\n")
+		svg.WriteString("      .boxz-debug-port { fill: #ef4444; stroke: #ffffff; stroke-width: 0.75; }\n")
+	}
 	svg.WriteString("    </style>\n  </defs>\n")
-	svg.WriteString("  <g class=\"boxz-containers\">\n")
-	writeContainers(&svg, l.Root)
-	svg.WriteString("  </g>\n")
+	if cfg.Debug {
+		svg.WriteString("  <g class=\"boxz-debug-routing\">\n")
+		writeRoutingGraph(&svg, routes)
+		svg.WriteString("  </g>\n")
+		svg.WriteString("  <g class=\"boxz-containers\">\n")
+		writeContainers(&svg, l.Root)
+		svg.WriteString("  </g>\n")
+	}
 	svg.WriteString("  <g class=\"boxz-edges\">\n")
 	for _, route := range routes.Edges {
 		edge := doc.Edges[route.EdgeIndex]
@@ -41,7 +55,13 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	}
 	svg.WriteString("  </g>\n  <g class=\"boxz-nodes\">\n")
 	writeNodes(&svg, l.Root)
-	svg.WriteString("  </g>\n</svg>\n")
+	svg.WriteString("  </g>\n")
+	if cfg.Debug {
+		svg.WriteString("  <g class=\"boxz-debug-ports\">\n")
+		writeDebugPorts(&svg, ports)
+		svg.WriteString("  </g>\n")
+	}
+	svg.WriteString("</svg>\n")
 	_, err = io.WriteString(w, svg.String())
 	return err
 }
@@ -273,6 +293,74 @@ func writeContainers(svg *strings.Builder, p *placement) {
 		number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))
 	for _, child := range p.Children {
 		writeContainers(svg, child)
+	}
+}
+
+func writeRoutingGraph(svg *strings.Builder, routes *routeResult) {
+	for _, s := range routes.Segments {
+		if s.A == s.B {
+			continue
+		}
+		kind := "channel"
+		if s.channel == "" {
+			kind = "riser"
+		} else if _, ok := routes.Crossbars[s.channel]; ok {
+			kind = "crossbar"
+		}
+		class := "boxz-debug-route boxz-debug-" + kind
+		if len(routes.ChannelUses[s.channel]) != 0 {
+			class += " boxz-debug-used"
+		}
+		fmt.Fprintf(svg, "    <line class=\"%s\"", class)
+		if s.channel != "" {
+			fmt.Fprintf(svg, " data-resource=\"%s\"", html.EscapeString(s.channel))
+		}
+		fmt.Fprintf(svg, " x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"/>\n",
+			number(s.A.X), number(s.A.Y), number(s.B.X), number(s.B.Y))
+	}
+}
+
+func writeDebugPorts(svg *strings.Builder, ports map[portKey]point) {
+	keys := make([]portKey, 0, len(ports))
+	for key := range ports {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left, right := keys[i], keys[j]
+		if left.node != right.node {
+			return left.node < right.node
+		}
+		if left.side != right.side {
+			return sideOrder(left.side) < sideOrder(right.side)
+		}
+		if left.edge != right.edge {
+			return left.edge < right.edge
+		}
+		return !left.to && right.to
+	})
+	for _, key := range keys {
+		p := ports[key]
+		end := "from"
+		if key.to {
+			end = "to"
+		}
+		fmt.Fprintf(svg, "    <circle class=\"boxz-debug-port\" data-node=\"%s\" data-side=\"%s\" data-edge=\"%d\" data-end=\"%s\" cx=\"%s\" cy=\"%s\" r=\"2.5\"/>\n",
+			html.EscapeString(key.node), key.side, key.edge, end, number(p.X), number(p.Y))
+	}
+}
+
+func sideOrder(side Side) int {
+	switch side {
+	case North:
+		return 0
+	case East:
+		return 1
+	case South:
+		return 2
+	case West:
+		return 3
+	default:
+		return 4
 	}
 }
 

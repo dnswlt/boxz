@@ -29,6 +29,7 @@ type routeGraph struct {
 	adj       [][]graphEdge
 	ports     map[string]map[Side]int
 	crossbars map[string]crossbarSpec
+	segments  []segment
 }
 
 // crossbarSpec records the sibling seam occupied by a generated connector and
@@ -67,6 +68,8 @@ type routeResult struct {
 	LaneByEdge  map[int]map[string]int
 	ChannelUses map[string][]int
 	Crossbars   map[string]crossbarSpec
+	// Segments retains the center-line graph solely for optional debug output.
+	Segments []segment
 }
 
 // routeDocument routes in source order. Earlier outer routes contribute to the
@@ -82,6 +85,9 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 		LaneByEdge:  make(map[int]map[string]int),
 		ChannelUses: make(map[string][]int),
 		Crossbars:   graph.crossbars,
+	}
+	if cfg.Debug {
+		result.Segments = graph.segments
 	}
 	usage := make(map[string]int)
 	for index, edge := range doc.Edges {
@@ -323,7 +329,11 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 		}
 	}
 
-	graph := &routeGraph{ports: make(map[string]map[Side]int), crossbars: crossbars}
+	graph := &routeGraph{
+		ports:     make(map[string]map[Side]int),
+		crossbars: crossbars,
+		segments:  segments,
+	}
 	vertexByPoint := make(map[point]int)
 	vertex := func(p point) int {
 		if existing, ok := vertexByPoint[p]; ok {

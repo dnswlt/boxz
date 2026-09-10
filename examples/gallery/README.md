@@ -10,8 +10,17 @@ Render the complete gallery from the repository root:
 ./scripts/render-gallery.sh
 ```
 
-The command writes `.gallery/index.html` and prints its absolute path. An
-alternative output directory may be passed as the first argument.
+The command writes `.gallery/index.html` and prints its absolute path. It enables
+debug rendering so container bounds, channels, risers, crossbars, and ports are
+visible. An alternative output directory may be passed as the first argument.
+
+Debug colors:
+
+- Cyan dashed lines: container-owned channel centerlines.
+- Purple dotted lines: hierarchy risers.
+- Amber dotted lines: sibling crossbars.
+- Red dots: allocated edge ports.
+- Light dashed rectangles: structural containers.
 
 | Example | What to inspect |
 | --- | --- |

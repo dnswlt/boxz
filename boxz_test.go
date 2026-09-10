@@ -240,11 +240,38 @@ func TestRenderSVGIsDeterministicAndOrthogonal(t *testing.T) {
 	if got := strings.Count(first.String(), `class="boxz-edge"`); got != 2 {
 		t.Fatalf("edge count = %d, want 2", got)
 	}
-	if got := strings.Count(first.String(), `class="boxz-container"`); got != 2 {
-		t.Fatalf("container count = %d, want 2", got)
+	if strings.Contains(first.String(), "boxz-debug-") || strings.Contains(first.String(), `class="boxz-container"`) {
+		t.Fatal("normal rendering contains debug geometry")
 	}
-	if !strings.Contains(first.String(), `data-container="root" data-kind="vbox"`) {
-		t.Fatal("rendered SVG does not identify the root container")
+
+	debugConfig := DefaultConfig()
+	debugConfig.Debug = true
+	var debug bytes.Buffer
+	if err := RenderSVG(&debug, doc, debugConfig); err != nil {
+		t.Fatal(err)
+	}
+	normalPaths := pathPattern.FindAllStringSubmatch(first.String(), -1)
+	debugPaths := pathPattern.FindAllStringSubmatch(debug.String(), -1)
+	if len(normalPaths) != len(debugPaths) {
+		t.Fatalf("debug edge count = %d, want %d", len(debugPaths), len(normalPaths))
+	}
+	for index := range normalPaths {
+		if normalPaths[index][1] != debugPaths[index][1] {
+			t.Fatalf("debug changed edge %d from %q to %q", index, normalPaths[index][1], debugPaths[index][1])
+		}
+	}
+	if got := strings.Count(debug.String(), `class="boxz-container"`); got != 2 {
+		t.Fatalf("debug container count = %d, want 2", got)
+	}
+	for _, marker := range []string{
+		`data-container="root" data-kind="vbox"`,
+		`boxz-debug-channel`,
+		`boxz-debug-riser`,
+		`boxz-debug-port`,
+	} {
+		if !strings.Contains(debug.String(), marker) {
+			t.Fatalf("debug SVG does not contain %q", marker)
+		}
 	}
 	assertOrthogonalPaths(t, first.String())
 }
@@ -529,15 +556,20 @@ edges {
 				t.Fatalf("route resources = %#v, want a sibling crossbar", routes.ChannelUses)
 			}
 
+			debugConfig := DefaultConfig()
+			debugConfig.Debug = true
 			var first, second bytes.Buffer
-			if err := RenderSVG(&first, doc, DefaultConfig()); err != nil {
+			if err := RenderSVG(&first, doc, debugConfig); err != nil {
 				t.Fatal(err)
 			}
-			if err := RenderSVG(&second, doc, DefaultConfig()); err != nil {
+			if err := RenderSVG(&second, doc, debugConfig); err != nil {
 				t.Fatal(err)
 			}
 			if first.String() != second.String() {
 				t.Fatal("crossbar routing is not deterministic")
+			}
+			if !strings.Contains(first.String(), "boxz-debug-crossbar") {
+				t.Fatal("debug SVG does not contain sibling crossbars")
 			}
 			assertOrthogonalPaths(t, first.String())
 		})

@@ -34,7 +34,7 @@ index="$output_dir/index.html"
 for input in "$repo_dir"/examples/gallery/*.boxz; do
   name=$(basename "$input" .boxz)
   criterion=$(sed -n '1s|^// *||p' "$input")
-  "$renderer" -o "$output_dir/$name.svg" "$input"
+  "$renderer" -debug -o "$output_dir/$name.svg" "$input"
   {
     printf '  <figure>\n'
     printf '    <figcaption>%s</figcaption>\n' "$name"

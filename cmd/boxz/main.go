@@ -15,8 +15,9 @@ func main() {
 
 func run() int {
 	outputPath := flag.String("o", "-", "output SVG file (default: stdout)")
+	debug := flag.Bool("debug", false, "draw containers and routing diagnostics")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: boxz [-o output.svg] input.boxz\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: boxz [-debug] [-o output.svg] input.boxz\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -50,7 +51,9 @@ func run() int {
 		defer file.Close()
 		output = file
 	}
-	if err := boxz.RenderSVG(output, doc, boxz.DefaultConfig()); err != nil {
+	cfg := boxz.DefaultConfig()
+	cfg.Debug = *debug
+	if err := boxz.RenderSVG(output, doc, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "boxz: %v\n", err)
 		return 1
 	}

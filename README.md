@@ -26,6 +26,16 @@ Render it with:
 go run ./cmd/boxz -o diagram.svg examples/basic.boxz
 ```
 
+Add `-debug` to draw the otherwise invisible layout and routing machinery:
+
+```sh
+go run ./cmd/boxz -debug -o diagram.svg examples/basic.boxz
+```
+
+Debug SVGs show dashed container bounds, channel centerlines, hierarchy risers,
+sibling crossbars, and allocated node ports. Debug mode does not change layout
+or edge routing.
+
 For visual review after routing or layout changes, render the focused example
 gallery and open the reported HTML file:
 
@@ -76,8 +86,8 @@ adjacency ordering break remaining ties; edge declaration order determines
 which routes contribute prior use. Within a sibling gap, crossbars avoid the
 exact access coordinates reserved by direct seam routes.
 
-Containers are structural, but are currently drawn with light dashed boundaries
-to make the layout and routing topology easier to debug.
+Containers are structural and are only drawn as light dashed boundaries in
+debug mode.
 
 Go-style line and block comments are accepted.
 

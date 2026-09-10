@@ -6,8 +6,11 @@ import (
 	"unicode/utf8"
 )
 
-// Config contains the deliberately simple geometry constants used by the MVP.
+// Config contains rendering options and the deliberately simple geometry
+// constants used by the MVP.
 type Config struct {
+	// Debug adds diagnostic SVG layers without changing layout or routing.
+	Debug          bool
 	CharacterWidth float64
 	LineHeight     float64
 	NodePaddingX   float64
