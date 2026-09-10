@@ -26,6 +26,16 @@ Render it with:
 go run ./cmd/boxz -o diagram.svg examples/basic.boxz
 ```
 
+For visual review after routing or layout changes, render the focused example
+gallery and open the reported HTML file:
+
+```sh
+./scripts/render-gallery.sh
+```
+
+See [examples/gallery/README.md](examples/gallery/README.md) for the scenarios
+and their visual acceptance criteria.
+
 ## Language
 
 There must be exactly one root element, followed by an optional `edges` block.

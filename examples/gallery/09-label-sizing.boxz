@@ -1,0 +1,17 @@
+// Inspect: conservative title sizing changes widths without breaking seam routes.
+vbox root {
+  hbox upper {
+    node short "A"
+    node long "A considerably longer service title"
+  }
+  hbox lower {
+    node database "DB"
+    node worker "Background worker"
+  }
+}
+
+edges {
+  short -> long
+  short -> database
+  long -> worker
+}

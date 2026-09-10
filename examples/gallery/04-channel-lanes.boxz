@@ -1,0 +1,13 @@
+// Inspect: three uses of the north channel have separate lanes and node ports.
+hbox root {
+  node source "Source"
+  node spare1 "Spare 1"
+  node spare2 "Spare 2"
+  node target "Target"
+}
+
+edges {
+  source:N -> target:N
+  source:N -> target:N
+  source:N -> target:N
+}

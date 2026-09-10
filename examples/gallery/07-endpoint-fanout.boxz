@@ -1,0 +1,30 @@
+// Inspect: each edge leaves E1 straight on its own port; no up-and-back humps.
+hbox root {
+  vbox west {
+    node w1 "W1"
+    node w2 "W2"
+    node w3 "W3"
+  }
+  vbox center {
+    hbox upper {
+      node u1 "U1"
+      node u2 "U2"
+      node u3 "U3"
+    }
+    hbox lower {
+      node l1 "L1"
+      node l2 "L2"
+      node l3 "L3"
+    }
+  }
+  vbox east {
+    node e1 "E1"
+    node e2 "E2"
+  }
+}
+
+edges {
+  e1 -> w1
+  e1 -> w2
+  e1 -> w3
+}

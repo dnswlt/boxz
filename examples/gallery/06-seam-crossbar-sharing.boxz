@@ -1,0 +1,24 @@
+// Inspect: the crossbar and direct seam access leg are close but never collinear.
+hbox root {
+  vbox center {
+    hbox upper {
+      node u1 "A"
+      node u2 "A"
+      node u3 "A"
+    }
+    hbox lower {
+      node l1 "A"
+      node l2 "A"
+      node l3 "A"
+    }
+  }
+  vbox east {
+    node e1 "A"
+    node e2 "A"
+  }
+}
+
+edges {
+  u1 -> e2
+  l1 -> u3
+}

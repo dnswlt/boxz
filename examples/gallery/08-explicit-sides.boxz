@@ -1,0 +1,12 @@
+// Inspect: constrained routes honor N/S while the adjacent edge remains E-W.
+hbox root {
+  node a "A"
+  node b "B"
+  node c "C"
+}
+
+edges {
+  a:N -> c:N
+  a:S -> c:S
+  b -> c
+}

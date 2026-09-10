@@ -1,0 +1,21 @@
+// Inspect: neighboring nodes use short E-W routes; aligned rows use N-S seams.
+vbox root {
+  hbox upper {
+    node a1 "A1"
+    node a2 "A2"
+    node a3 "A3"
+  }
+  hbox lower {
+    node b1 "B1"
+    node b2 "B2"
+    node b3 "B3"
+  }
+}
+
+edges {
+  a1 -> a2
+  a2 -> a3
+  a1 -> b1
+  a2 -> b2
+  a3 -> b3
+}

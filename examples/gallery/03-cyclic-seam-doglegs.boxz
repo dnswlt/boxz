@@ -1,0 +1,16 @@
+// Inspect: crossed connections get distinct tracks and local doglegs, never overlap.
+vbox root {
+  hbox upper {
+    node a1 "A"
+    node a2 "A"
+  }
+  hbox lower {
+    node b1 "A"
+    node b2 "A"
+  }
+}
+
+edges {
+  a1 -> b2
+  a2 -> b1
+}

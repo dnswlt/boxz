@@ -1,0 +1,30 @@
+// Inspect: deeply nested frontier nodes still route directly across both seams.
+vbox root {
+  hbox north {
+    vbox northwest {
+      node n1 "N1"
+      node n2 "N2"
+    }
+    vbox northeast {
+      node n3 "N3"
+      node n4 "N4"
+    }
+  }
+  hbox south {
+    vbox southwest {
+      node s1 "S1"
+      node s2 "S2"
+    }
+    vbox southeast {
+      node s3 "S3"
+      node s4 "S4"
+    }
+  }
+}
+
+edges {
+  n1 -> n3
+  n2 -> s1
+  n4 -> s3
+  s2 -> s4
+}
