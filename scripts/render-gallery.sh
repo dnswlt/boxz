@@ -21,7 +21,7 @@ index="$output_dir/index.html"
   printf '%s\n' '<style>'
   printf '%s\n' 'body { margin: 24px; color: #0f172a; background: #f8fafc; font: 14px ui-sans-serif, system-ui, sans-serif; }'
   printf '%s\n' 'h1 { margin: 0 0 20px; font-size: 24px; }'
-  printf '%s\n' 'main { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; align-items: start; }'
+  printf '%s\n' 'main { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }'
   printf '%s\n' 'figure { margin: 0; padding: 16px; overflow: auto; background: white; border: 1px solid #cbd5e1; border-radius: 8px; }'
   printf '%s\n' 'figcaption { margin-bottom: 12px; font-weight: 600; }'
   printf '%s\n' 'p { margin: -4px 0 12px; color: #475569; }'
