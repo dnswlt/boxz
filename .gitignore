@@ -1,1 +1,24 @@
+# Generated output
 /.gallery/
+/boxz
+*.test
+*.out
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local environment and temporary files
+.env
+.env.*
+!.env.example
+*.log
+tmp/
