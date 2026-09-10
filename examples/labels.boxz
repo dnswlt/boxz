@@ -1,6 +1,6 @@
 hbox root {
   vbox leftExt {
-    node w1 "W1"
+    node w1 "Best Western #1"
     node w2 "W2"
     node w3 "W3"
     node w4 "W4"
@@ -8,12 +8,12 @@ hbox root {
   vbox center {
     hbox upperService {
         node u1 "U1"
-        node u2 "U2"
+        node u2 "U2 (Not the Band)"
         node u3 "U3"
     }
     hbox lowerService {
         node l1 "L1"
-        node l2 "L2"
+        node l2 "L2, the lower one"
         node l3 "L3"
     }
   }

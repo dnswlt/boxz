@@ -622,6 +622,57 @@ edges {
 	}
 }
 
+func TestEndpointCrossbarUsesAllocatedPortCoordinate(t *testing.T) {
+	doc, err := ParseString("arrangement.boxz", `
+hbox root {
+  vbox leftExt { node w1 node w2 node w3 node w4 }
+  vbox center {
+    hbox upperService { node u1 node u2 node u3 }
+    hbox lowerService { node l1 node l2 node l3 }
+  }
+  vbox rightExt { node e1 node e2 }
+}
+edges {
+  u1 -> e2
+  l1 -> u3
+  l1 -> l2
+  l1:N -> l3:N
+  e1 -> w1
+  e1 -> w2
+  e1 -> w3
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, routes, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ports := allocatePorts(l, routes)
+	var points []point
+	for _, route := range routes.Edges {
+		if route.From == "e1" && route.To == "w3" {
+			points = displayRoute(route, routes, ports, DefaultConfig())
+			break
+		}
+	}
+	if len(points) < 2 {
+		t.Fatal("e1 -> w3 route is missing")
+	}
+	centerEast := l.ByID["center"].Rect.X + l.ByID["center"].Rect.W
+	if points[0].Y != points[1].Y || points[1].X > centerEast {
+		t.Fatalf("route turns inside the sibling gap immediately after e1: %v", points)
+	}
+
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrthogonalPaths(t, output.String())
+	assertNoCollinearEdgeOverlaps(t, output.String())
+}
+
 var pathPattern = regexp.MustCompile(`<path class="boxz-edge"[^>]* d="([^"]+)"`)
 var coordinatePattern = regexp.MustCompile(`(?:M|L) ([0-9.]+) ([0-9.]+)`)
 

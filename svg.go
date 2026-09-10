@@ -184,17 +184,7 @@ func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]poin
 		}
 
 		a, b := route.Points[first], route.Points[last+1]
-		offset := 0.0
-		for segmentIndex := first; segmentIndex <= last; segmentIndex++ {
-			channelName := route.Channels[segmentIndex]
-			if channelName == "" {
-				continue
-			}
-			lane := routes.LaneByEdge[route.EdgeIndex][channelName]
-			count := len(routes.ChannelUses[channelName])
-			offset = (float64(lane) - float64(count-1)/2) * cfg.LaneSpacing
-			break
-		}
+		offset := routeRunOffset(route, routes, first, last, cfg)
 		if horizontal {
 			a.Y += offset
 			b.Y += offset
@@ -238,17 +228,22 @@ func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]poin
 func simplifyPoints(points []point) []point {
 	result := make([]point, 0, len(points))
 	for _, p := range points {
-		if len(result) != 0 && result[len(result)-1] == p {
-			continue
-		}
-		if len(result) >= 2 {
-			a, b := result[len(result)-2], result[len(result)-1]
-			if (a.X == b.X && b.X == p.X) || (a.Y == b.Y && b.Y == p.Y) {
-				result[len(result)-1] = p
+		result = append(result, p)
+		for {
+			if len(result) >= 2 && result[len(result)-2] == result[len(result)-1] {
+				result = result[:len(result)-1]
 				continue
 			}
+			if len(result) >= 3 {
+				a, b, c := result[len(result)-3], result[len(result)-2], result[len(result)-1]
+				if (a.X == b.X && b.X == c.X) || (a.Y == b.Y && b.Y == c.Y) {
+					result[len(result)-2] = c
+					result = result[:len(result)-1]
+					continue
+				}
+			}
+			break
 		}
-		result = append(result, p)
 	}
 	return result
 }

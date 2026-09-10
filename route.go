@@ -197,6 +197,20 @@ func trackOffset(track, count int, spacing float64) float64 {
 	return (float64(track) - float64(count-1)/2) * spacing
 }
 
+// routeRunOffset returns the display lane selected by the first named routing
+// resource in a collinear run.
+func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg Config) float64 {
+	for segmentIndex := first; segmentIndex <= last; segmentIndex++ {
+		resource := route.Channels[segmentIndex]
+		if resource == "" {
+			continue
+		}
+		lane := routes.LaneByEdge[route.EdgeIndex][resource]
+		return trackOffset(lane, len(routes.ChannelUses[resource]), cfg.LaneSpacing)
+	}
+	return 0
+}
+
 func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, cfg Config) error {
 	for index, route := range routes.Edges {
 		spec := plan.Seams[route.EdgeIndex]

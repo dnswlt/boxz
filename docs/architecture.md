@@ -111,10 +111,12 @@ resources and contribute to the congestion tie-breaker.
 
 After ports and direct seam tracks are final, movable crossbars are allocated in
 the same sibling-gap domain. The direct routes' endpoint coordinates are
-reserved first; crossbars choose distinct nearby coordinates within the overlap
-of their facing channels. Short shoulders connect a shifted crossbar back to
-those channels. This prevents a perpendicular crossbar from lying on top of a
-direct route's access leg without changing either route's topology.
+reserved first. A crossbar prefers the resolved coordinate of its straight run:
+the exact node port when endpoint-adjacent, otherwise the assigned channel lane.
+It then chooses a distinct nearby coordinate within the overlap of its facing
+channels. Short shoulders connect a shifted crossbar back to those channels.
+This prevents both false conflicts with already-separated ports and real
+overlaps with a direct route's access leg without changing route topology.
 
 Outer routes use Dijkstra's algorithm with a lexicographic cost:
 

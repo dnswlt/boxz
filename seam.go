@@ -107,10 +107,8 @@ func assignCrossbarTracks(doc *Document, l *layout, plan *routingPlan, routes *r
 				continue
 			}
 			seen[resource] = true
-			preferred := route.Points[segmentIndex].X
-			if spec.Horizontal {
-				preferred = route.Points[segmentIndex].Y
-			}
+			preferred := physicalRunCoordinate(route, segmentIndex, routes, ports, cfg)
+			preferred = math.Max(spec.Low, math.Min(spec.High, preferred))
 			groups[spec.SeamID] = append(groups[spec.SeamID], crossbarUse{
 				route: route, spec: spec, preferred: preferred,
 			})
@@ -143,6 +141,41 @@ func assignCrossbarTracks(doc *Document, l *layout, plan *routingPlan, routes *r
 		rewriteCrossbarTracks(route, routes.Crossbars, tracks)
 	}
 	return nil
+}
+
+// physicalRunCoordinate predicts the final coordinate of the straight run
+// containing segmentIndex. Endpoint ports override lane offsets in displayRoute,
+// so endpoint-adjacent crossbars must use those exact coordinates too.
+func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeResult, ports map[portKey]point, cfg Config) float64 {
+	horizontal := route.Points[segmentIndex].Y == route.Points[segmentIndex+1].Y
+	first, last := segmentIndex, segmentIndex
+	for first > 0 && (route.Points[first-1].Y == route.Points[first].Y) == horizontal {
+		first--
+	}
+	for last+1 < len(route.Channels) && (route.Points[last+1].Y == route.Points[last+2].Y) == horizontal {
+		last++
+	}
+
+	coordinate := route.Points[segmentIndex].X
+	if horizontal {
+		coordinate = route.Points[segmentIndex].Y
+	}
+	coordinate += routeRunOffset(route, routes, first, last, cfg)
+	if first == 0 {
+		port := ports[portKey{node: route.From, side: route.FromSide, edge: route.EdgeIndex}]
+		if horizontal {
+			return port.Y
+		}
+		return port.X
+	}
+	if last == len(route.Channels)-1 {
+		port := ports[portKey{node: route.To, side: route.ToSide, edge: route.EdgeIndex, to: true}]
+		if horizontal {
+			return port.Y
+		}
+		return port.X
+	}
+	return coordinate
 }
 
 func rewriteCrossbarTracks(route *routedEdge, specs map[string]crossbarSpec, tracks map[string]float64) {
