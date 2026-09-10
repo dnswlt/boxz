@@ -83,6 +83,9 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 			if err := rerouteSeams(doc, l, plan, routes, cfg); err != nil {
 				return nil, nil, err
 			}
+			if err := assignCrossbarTracks(doc, l, plan, routes, ports, cfg); err != nil {
+				return nil, nil, err
+			}
 			return l, routes, nil
 		}
 	}

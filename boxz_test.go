@@ -446,6 +446,182 @@ edges {
 	}
 }
 
+func TestOuterRoutesCrossAdjacentSiblingChannels(t *testing.T) {
+	tests := map[string]string{
+		"horizontal sibling gap": `
+hbox root {
+  vbox center {
+    hbox upper {
+      node u1
+      node u2
+    }
+    hbox lower {
+      node l1
+      node l2
+    }
+  }
+  vbox right {
+    node e1
+    node e2
+  }
+}
+edges {
+  u1 -> e2
+}
+`,
+		"vertical sibling gap": `
+vbox root {
+  hbox upper {
+    vbox column {
+      node u1
+      node u2
+    }
+    node ur
+  }
+  hbox lower {
+    vbox column2 {
+      node d1
+      node d2
+    }
+    node dr
+  }
+}
+edges {
+  u1 -> d1
+}
+`,
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			doc, err := ParseString("crossbar.boxz", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := buildRoutingPlan(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Seams[0] != nil {
+				t.Fatalf("route unexpectedly classified as a direct seam: %#v", plan.Seams[0])
+			}
+			_, routes, err := solve(doc, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			usesCrossbar := false
+			for resource, edgeIndexes := range routes.ChannelUses {
+				usedByRoute := false
+				for _, edgeIndex := range edgeIndexes {
+					usedByRoute = usedByRoute || edgeIndex == routes.Edges[0].EdgeIndex
+				}
+				if !usedByRoute {
+					continue
+				}
+				if strings.Contains(resource, ":crossbar:") {
+					usesCrossbar = true
+				}
+				if resource == channelID("root", North) || resource == channelID("root", South) ||
+					resource == channelID("root", East) || resource == channelID("root", West) {
+					t.Fatalf("route used root outer channel %q instead of a local crossbar", resource)
+				}
+			}
+			if !usesCrossbar {
+				t.Fatalf("route resources = %#v, want a sibling crossbar", routes.ChannelUses)
+			}
+
+			var first, second bytes.Buffer
+			if err := RenderSVG(&first, doc, DefaultConfig()); err != nil {
+				t.Fatal(err)
+			}
+			if err := RenderSVG(&second, doc, DefaultConfig()); err != nil {
+				t.Fatal(err)
+			}
+			if first.String() != second.String() {
+				t.Fatal("crossbar routing is not deterministic")
+			}
+			assertOrthogonalPaths(t, first.String())
+		})
+	}
+}
+
+func TestSiblingCrossbarAllocatesParallelLanes(t *testing.T) {
+	doc, err := ParseString("crossbar-lanes.boxz", `
+hbox root {
+  vbox center {
+    hbox upper {
+      node u1
+      node u2
+    }
+    node lower
+  }
+  vbox right {
+    node e1
+    node e2
+  }
+}
+edges {
+  u1 -> e2
+  u1 -> e2
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrthogonalPaths(t, output.String())
+	assertNoCollinearEdgeOverlaps(t, output.String())
+}
+
+func TestCrossbarAvoidsDirectSeamAccessLeg(t *testing.T) {
+	tests := map[string]string{
+		"vertical crossbar": `
+hbox root {
+  vbox leftExt { node w1 node w2 node w3 node w4 }
+  vbox center {
+    hbox upperService { node u1 node u2 node u3 }
+    hbox lowerService { node l1 node l2 node l3 }
+  }
+  vbox rightExt { node e1 node e2 }
+}
+edges {
+  u1 -> e2
+  l1 -> u3
+}
+		`,
+		"horizontal crossbar": `
+vbox root {
+  hbox upperExt { node w1 node w2 node w3 node w4 }
+  hbox center {
+    vbox leftService { node u1 node u2 node u3 }
+    vbox rightService { node l1 node l2 node l3 }
+  }
+  hbox lowerExt { node e1 node e2 }
+}
+edges {
+  u1 -> e2
+  l1 -> u3
+}
+`,
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			doc, err := ParseString("arrangement.boxz", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+				t.Fatal(err)
+			}
+			assertOrthogonalPaths(t, output.String())
+			assertNoCollinearEdgeOverlaps(t, output.String())
+		})
+	}
+}
+
 var pathPattern = regexp.MustCompile(`<path class="boxz-edge"[^>]* d="([^"]+)"`)
 var coordinatePattern = regexp.MustCompile(`(?:M|L) ([0-9.]+) ([0-9.]+)`)
 

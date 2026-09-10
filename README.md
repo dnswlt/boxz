@@ -59,9 +59,12 @@ with doglegs and additional seam tracks; nodes remain fixed.
 
 For other edges, an `hbox` owns north and south outer channels while a `vbox`
 owns west and east outer channels. Nested containers connect to their parents
-through orthogonal risers. These routes minimize geometric distance, then bends,
-then prior channel use. Fixed side and adjacency ordering break remaining ties;
-edge declaration order determines which routes contribute prior channel use.
+through orthogonal risers. Facing channel networks of adjacent siblings are
+connected by local crossbars inside their empty gap. These routes minimize
+geometric distance, then bends, then prior routing-resource use. Fixed side and
+adjacency ordering break remaining ties; edge declaration order determines
+which routes contribute prior use. Within a sibling gap, crossbars avoid the
+exact access coordinates reserved by direct seam routes.
 
 Containers are structural, but are currently drawn with light dashed boundaries
 to make the layout and routing topology easier to debug.

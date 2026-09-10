@@ -1,0 +1,29 @@
+hbox root {
+  vbox leftExt {
+    node w1 "W1"
+    node w2 "W2"
+    node w3 "W3"
+    node w4 "W4"
+  }
+  vbox center {
+    hbox upperService {
+        node u1 "U1"
+        node u2 "U2"
+        node u3 "U3"
+    }
+    hbox lowerService {
+        node l1 "L1"
+        node l2 "L2"
+        node l3 "L3"
+    }
+  }
+  vbox rightExt {
+    node e1 "E1"
+    node e2 "E2"
+  }
+}
+
+edges {
+    u1 -> e2
+    l1 -> u3
+}

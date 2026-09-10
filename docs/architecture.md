@@ -97,6 +97,25 @@ display path.
 graph. Every intersection splits both participating segments. Node-side portals
 become graph vertices, so a graph path always starts and ends on legal sides.
 
+Adjacent container children also receive local **crossbars** between their
+facing boundary networks. A crossbar is created only at a structural coordinate
+already exposed by a channel endpoint, hierarchy riser, or channel
+intersection, and only when both boundaries are routable there. Its segment
+lies entirely in the empty sibling gap. Node boundaries are excluded so an
+unrelated route cannot use a node as a transit junction.
+
+Crossbars do not weaken recursive-frontier rules. Frontier-to-frontier edges
+still receive direct seam routes first; an outer route can cross a sibling gap
+only after it has reached a boundary channel. Crossbars are named routing
+resources and contribute to the congestion tie-breaker.
+
+After ports and direct seam tracks are final, movable crossbars are allocated in
+the same sibling-gap domain. The direct routes' endpoint coordinates are
+reserved first; crossbars choose distinct nearby coordinates within the overlap
+of their facing channels. Short shoulders connect a shifted crossbar back to
+those channels. This prevents a perpendicular crossbar from lying on top of a
+direct route's access leg without changing either route's topology.
+
 Outer routes use Dijkstra's algorithm with a lexicographic cost:
 
 1. Manhattan distance;
@@ -127,6 +146,9 @@ orthogonal projection and removes duplicate or redundant collinear points.
 - Seam classification depends only on the element tree and explicit side
   constraints.
 - Seam track ordering depends only on final port alignment within that seam.
+- Sibling crossbars connect routing networks, never arbitrary visible points or
+  node interiors.
+- Direct seam access coordinates and movable crossbar tracks cannot coincide.
 - All route segments are horizontal or vertical.
 - Channel allocation grows monotonically until stable.
 - Iteration over maps must not affect rendered output.

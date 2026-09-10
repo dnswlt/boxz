@@ -25,9 +25,20 @@ type graphEdge struct {
 type routeGraph struct {
 	// points and adj form the rectilinear graph; ports select legal endpoint
 	// vertices for each node side.
-	points []point
-	adj    [][]graphEdge
-	ports  map[string]map[Side]int
+	points    []point
+	adj       [][]graphEdge
+	ports     map[string]map[Side]int
+	crossbars map[string]crossbarSpec
+}
+
+// crossbarSpec records the sibling seam occupied by a generated connector and
+// the interval in which its perpendicular track may move after routing.
+type crossbarSpec struct {
+	ID         string
+	SeamID     string
+	Horizontal bool
+	Low        float64
+	High       float64
 }
 
 type direction uint8
@@ -55,6 +66,7 @@ type routeResult struct {
 	// display lanes after routing is complete.
 	LaneByEdge  map[int]map[string]int
 	ChannelUses map[string][]int
+	Crossbars   map[string]crossbarSpec
 }
 
 // routeDocument routes in source order. Earlier outer routes contribute to the
@@ -69,6 +81,7 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 		LaneCounts:  make(map[string]int),
 		LaneByEdge:  make(map[int]map[string]int),
 		ChannelUses: make(map[string][]int),
+		Crossbars:   graph.crossbars,
 	}
 	usage := make(map[string]int)
 	for index, edge := range doc.Edges {
@@ -262,8 +275,8 @@ func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 	return points, true
 }
 
-// makeRouteGraph splits channel center lines and hierarchy risers at every
-// intersection, producing the graph searched by outer routes.
+// makeRouteGraph splits channel center lines, hierarchy risers, and sibling
+// crossbars at every intersection, producing the graph searched by outer routes.
 func makeRouteGraph(l *layout) (*routeGraph, error) {
 	// Center lines are sufficient for path finding. Physical lane offsets are a
 	// display concern applied only after every route and lane count is known.
@@ -274,6 +287,9 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 	}
 	ports := make(map[string]map[Side]point)
 	addHierarchySegments(l.Root, &segments, ports)
+	baseSegments := append([]segment(nil), segments...)
+	crossbars := make(map[string]crossbarSpec)
+	addSiblingCrossbars(l.Root, baseSegments, &segments, crossbars)
 
 	// Split every segment at all crossings and overlaps. Shared coordinates then
 	// become graph vertices at which a route may turn or change hierarchy level.
@@ -293,7 +309,7 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 		}
 	}
 
-	graph := &routeGraph{ports: make(map[string]map[Side]int)}
+	graph := &routeGraph{ports: make(map[string]map[Side]int), crossbars: crossbars}
 	vertexByPoint := make(map[point]int)
 	vertex := func(p point) int {
 		if existing, ok := vertexByPoint[p]; ok {
@@ -350,6 +366,150 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 		})
 	}
 	return graph, nil
+}
+
+// boundaryAccess describes the routable portion of one container side. A
+// matching channel makes the whole side interval available; containers with
+// only orthogonal channels expose their channel endpoints as discrete portals.
+type boundaryAccess struct {
+	line   *segment
+	points []point
+}
+
+// addSiblingCrossbars connects facing routing networks across otherwise empty
+// sibling gaps. Candidate coordinates come from existing structural vertices,
+// keeping the graph finite and independent of arbitrary geometric visibility.
+func addSiblingCrossbars(parent *placement, baseSegments []segment, segments *[]segment, specs map[string]crossbarSpec) {
+	if parent.Element.Kind == KindNode {
+		return
+	}
+	for index := 0; index+1 < len(parent.Children); index++ {
+		first, second := parent.Children[index], parent.Children[index+1]
+		var firstSide, secondSide Side
+		if parent.Element.Kind == KindHBox {
+			firstSide, secondSide = East, West
+		} else {
+			firstSide, secondSide = South, North
+		}
+		firstAccess := routingBoundary(first, firstSide)
+		secondAccess := routingBoundary(second, secondSide)
+		if firstAccess == nil || secondAccess == nil {
+			continue
+		}
+
+		coordinates := append(boundaryCoordinates(firstAccess, baseSegments, parent.Element.Kind),
+			boundaryCoordinates(secondAccess, baseSegments, parent.Element.Kind)...)
+		coordinates = sortedUniqueCoordinates(coordinates)
+		crossbarIndex := 0
+		for _, coordinate := range coordinates {
+			a, firstOK := boundaryPoint(firstAccess, coordinate, parent.Element.Kind)
+			b, secondOK := boundaryPoint(secondAccess, coordinate, parent.Element.Kind)
+			if !firstOK || !secondOK || a == b {
+				continue
+			}
+			id := crossbarID(parent.Element.ID, index, crossbarIndex)
+			*segments = append(*segments, segment{
+				A:       a,
+				B:       b,
+				channel: id,
+			})
+			low, high := coordinate, coordinate
+			if firstAccess.line != nil && secondAccess.line != nil {
+				low, high = boundaryOverlap(*firstAccess.line, *secondAccess.line, parent.Element.Kind)
+			}
+			specs[id] = crossbarSpec{
+				ID:         id,
+				SeamID:     seamID(parent.Element.ID, index),
+				Horizontal: parent.Element.Kind == KindHBox,
+				Low:        low,
+				High:       high,
+			}
+			crossbarIndex++
+		}
+	}
+	for _, child := range parent.Children {
+		addSiblingCrossbars(child, baseSegments, segments, specs)
+	}
+}
+
+func boundaryOverlap(first, second segment, parentKind Kind) (float64, float64) {
+	if parentKind == KindHBox {
+		return math.Max(math.Min(first.A.Y, first.B.Y), math.Min(second.A.Y, second.B.Y)),
+			math.Min(math.Max(first.A.Y, first.B.Y), math.Max(second.A.Y, second.B.Y))
+	}
+	return math.Max(math.Min(first.A.X, first.B.X), math.Min(second.A.X, second.B.X)),
+		math.Min(math.Max(first.A.X, first.B.X), math.Max(second.A.X, second.B.X))
+}
+
+func routingBoundary(child *placement, side Side) *boundaryAccess {
+	if child.Element.Kind == KindNode {
+		// Node boundaries must remain route endpoints, never transit junctions.
+		return nil
+	}
+	if c := child.Channels[side]; c != nil {
+		line := segment{A: c.A, B: c.B, channel: c.ID}
+		return &boundaryAccess{line: &line}
+	}
+	return &boundaryAccess{points: boundaryPortals(child, side)}
+}
+
+func boundaryCoordinates(access *boundaryAccess, segments []segment, parentKind Kind) []float64 {
+	coordinate := func(p point) float64 {
+		if parentKind == KindHBox {
+			return p.Y
+		}
+		return p.X
+	}
+	if access.line == nil {
+		result := make([]float64, 0, len(access.points))
+		for _, p := range access.points {
+			result = append(result, coordinate(p))
+		}
+		return result
+	}
+
+	result := []float64{coordinate(access.line.A), coordinate(access.line.B)}
+	for _, candidate := range segments {
+		for _, intersection := range segmentIntersections(*access.line, candidate) {
+			result = append(result, coordinate(intersection))
+		}
+	}
+	return result
+}
+
+func boundaryPoint(access *boundaryAccess, coordinate float64, parentKind Kind) (point, bool) {
+	if access.line != nil {
+		candidate := point{X: coordinate, Y: access.line.A.Y}
+		if parentKind == KindHBox {
+			candidate = point{X: access.line.A.X, Y: coordinate}
+		}
+		return candidate, pointOnSegment(candidate, *access.line)
+	}
+	for _, p := range access.points {
+		value := p.X
+		if parentKind == KindHBox {
+			value = p.Y
+		}
+		if sameCoordinate(value, coordinate) {
+			return p, true
+		}
+	}
+	return point{}, false
+}
+
+func sortedUniqueCoordinates(values []float64) []float64 {
+	sort.Float64s(values)
+	result := make([]float64, 0, len(values))
+	for _, value := range values {
+		if len(result) == 0 || !sameCoordinate(result[len(result)-1], value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func crossbarID(parentID string, firstChild, index int) string {
+	return fmt.Sprintf("%s:crossbar:%d:%d", parentID, firstChild, index)
 }
 
 // addHierarchySegments connects child boundary portals to the channels owned by
