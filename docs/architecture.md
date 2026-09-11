@@ -46,6 +46,12 @@ west and east channels. Nodes are the only visible, connectable elements.
 Containers are structural: their rectangles and routing machinery are rendered
 only when debug output is enabled.
 
+Attribute syntax is deliberately generic, but the validated model is not.
+`syntax.go` converts parsed key/value pairs into explicit subject-specific
+fields such as `NodeAttributes.Spring`. Unknown names and incompatible value
+types are rejected at that boundary; routing and layout never interpret raw
+attribute strings or generic maps.
+
 There are two kinds of routes:
 
 - A **seam route** crosses the gap between adjacent children of one container.
@@ -121,9 +127,9 @@ node order remain unchanged.
 
 ## Measurement and placement
 
-`layout.go` first measures the tree bottom-up, then assigns rectangles top-down.
-Node titles use a conservative character-width estimate. Nodes may grow further
-to fit their anticipated ports.
+`layout.go` first measures minimum sizes and growth capabilities bottom-up, then
+assigns available rectangles top-down. Node titles use a conservative
+character-width estimate. Nodes may grow further to fit their anticipated ports.
 
 Containers reserve three distinct kinds of space:
 
@@ -135,10 +141,17 @@ Each outer channel is represented by one center line during routing. Individual
 edge lanes are offsets from that line and are applied only when producing the
 display path.
 
-The current layout is entirely intrinsic: containers take the size required by
-their children and routing bands, and children are centered on the parent's
-cross axis. There is no separate allocated slot, stretch, or alignment model
-yet.
+### Springs and surplus
+
+Standalone springs are stored as weighted gaps around the real children and
+therefore do not enter topology or recursive-frontier calculations. Bottom-up
+measurement propagates per-axis growth capability; top-down placement
+distributes surplus among standalone springs and spring-like children.
+
+The placement slot and routing rectangle differ when a leading or trailing
+spring consumes surplus. Internal springs enlarge the sibling seam, while edge
+springs align a compact rectangle whose owned channels exclude the unused
+margin. See [Springs](springs.md) for the user-facing semantics and examples.
 
 ## Outer-channel graph
 
@@ -213,6 +226,10 @@ sibling crossbars use distinct classes and colors. Named resources also carry
 
 - Source order determines node order.
 - Routing may grow geometry, never reorder it.
+- Springs affect placement and dimensions but are absent from the element tree
+  used for topology and recursive frontiers.
+- Edge springs align a compact routing rectangle; they do not extend its owned
+  channels through empty alignment space.
 - Structural containers are routing topology, not connectable obstacles.
 - Seam classification depends only on the element tree and explicit side
   constraints.
@@ -228,7 +245,9 @@ sibling crossbars use distinct classes and colors. Named resources also carry
 - Equal-cost paths use fixed side order, sorted adjacency, and search insertion
   order as deterministic tie-breakers.
 - Edge declaration order governs congestion history and lane numbering.
+- Graph vertices use exact point identity. Derived intersections must reuse
+  coordinates from stored geometry rather than recomputing equivalent floats.
 
 Tests in `boxz_test.go` exercise these invariants, especially recursive
-frontiers, deterministic output, orthogonality, and the absence of lane-offset
-jogs.
+frontiers, deterministic output, orthogonality, node separation, route avoidance
+of unrelated node interiors, and the absence of lane-offset jogs.

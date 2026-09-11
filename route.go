@@ -334,6 +334,9 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 		crossbars: crossbars,
 		segments:  segments,
 	}
+	// Exact point identity joins graph vertices. New intersection points copy one
+	// coordinate from each stored segment; callers must not recompute equivalent
+	// coordinates through different floating-point arithmetic.
 	vertexByPoint := make(map[point]int)
 	vertex := func(p point) int {
 		if existing, ok := vertexByPoint[p]; ok {

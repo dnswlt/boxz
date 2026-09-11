@@ -1,0 +1,44 @@
+// Edge springs align compact columns; internal springs and spring nodes share vertical surplus by weight.
+hbox root {
+  vbox heightSource {
+    node ruler1 "R1"
+    node ruler2 "R2"
+    node ruler3 "R3"
+    node ruler4 "R4"
+    node ruler5 "R5"
+  }
+
+  vbox topAligned {
+    node t1 "T1"
+    node t2 "T2"
+    spring
+  }
+
+  vbox splitGap {
+    node s1 "S1"
+    spring
+    spring
+    node s2 "S2"
+  }
+
+  vbox growingNodes {
+    node g1 "G1" [spring]
+    spring
+    node g2 "G2" [spring = true,]
+  }
+
+  vbox bottomAligned {
+    spring
+    node b1 "B1"
+    node b2 "B2"
+  }
+}
+
+edges {
+  t1 -> s1
+  t2 -> s2
+  s1 -> g2
+  s2 -> g1
+  g1 -> b1
+  g2 -> b2
+}

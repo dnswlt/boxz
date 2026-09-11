@@ -18,6 +18,11 @@ const (
 	KindVBox Kind = "vbox"
 )
 
+// NodeAttributes contains the validated attributes available to visible nodes.
+type NodeAttributes struct {
+	Spring bool
+}
+
 // Side identifies one side of a node or layout box.
 type Side string
 
@@ -36,10 +41,14 @@ type Document struct {
 
 // Element is either a visible node or an ordered layout container.
 type Element struct {
-	Kind     Kind
-	ID       string
-	Title    string
-	Children []*Element
+	Kind           Kind
+	ID             string
+	Title          string
+	NodeAttributes NodeAttributes
+	Children       []*Element
+	// Springs has one entry before each child and one after the last child.
+	// Its value is the number of equal-weight springs in that gap; nil means none.
+	Springs  []int
 	Parent   *Element
 	position lexer.Position
 }
@@ -59,15 +68,43 @@ type syntaxDocument struct {
 }
 
 type syntaxElement struct {
-	Pos   lexer.Position
-	Kind  string      `parser:"@Ident"`
-	ID    string      `parser:"@Ident"`
-	Title *string     `parser:"(@String)?"`
-	Body  *syntaxBody `parser:"@@?"`
+	Pos        lexer.Position
+	Kind       string            `parser:"@Ident"`
+	ID         string            `parser:"@Ident"`
+	Title      *string           `parser:"(@String)?"`
+	Attributes *syntaxAttributes `parser:"@@?"`
+	Body       *syntaxBody       `parser:"@@?"`
 }
 
 type syntaxBody struct {
-	Children []*syntaxElement `parser:"'{' @@* '}'"`
+	Items []*syntaxBodyItem `parser:"'{' @@* '}'"`
+}
+
+type syntaxBodyItem struct {
+	Pos     lexer.Position
+	Spring  bool           `parser:"  @'spring'"`
+	Element *syntaxElement `parser:"| @@"`
+}
+
+type syntaxAttributes struct {
+	Items []*syntaxAttribute `parser:"'[' ( @@ ( ',' @@ )* ','? )? ']'"`
+}
+
+type syntaxAttribute struct {
+	Pos   lexer.Position
+	Key   string                `parser:"@Ident"`
+	Value *syntaxAttributeValue `parser:"( '=' @@ )?"`
+}
+
+type syntaxAttributeValue struct {
+	String *string       `parser:"  @String"`
+	Number *syntaxNumber `parser:"| @@"`
+	Ident  *string       `parser:"| @Ident"`
+}
+
+type syntaxNumber struct {
+	Negative bool   `parser:"@'-'?"`
+	Value    string `parser:"@(Float | Int)"`
 }
 
 type syntaxEdgeBlock struct {
@@ -139,7 +176,12 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 	}
 	seen[raw.ID] = raw.Pos
 
-	element := &Element{Kind: Kind(raw.Kind), ID: raw.ID, Parent: parent, position: raw.Pos}
+	element := &Element{
+		Kind:     Kind(raw.Kind),
+		ID:       raw.ID,
+		Parent:   parent,
+		position: raw.Pos,
+	}
 	switch element.Kind {
 	case KindNode:
 		if raw.Body != nil {
@@ -154,25 +196,80 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 		if raw.Title != nil {
 			return nil, diagnostic(filename, raw.Pos, "%s %q cannot have a title", raw.Kind, raw.ID)
 		}
-		if raw.Body == nil || len(raw.Body.Children) == 0 {
-			return nil, diagnostic(filename, raw.Pos, "%s %q must contain at least one child", raw.Kind, raw.ID)
-		}
 	default:
 		return nil, diagnostic(filename, raw.Pos, "unknown element kind %q", raw.Kind)
 	}
-
-	var children []*syntaxElement
-	if raw.Body != nil {
-		children = raw.Body.Children
+	if err := convertAttributes(filename, element, raw.Attributes); err != nil {
+		return nil, err
 	}
-	for _, child := range children {
-		converted, err := convertElement(filename, child, element, seen)
+
+	var items []*syntaxBodyItem
+	if raw.Body != nil {
+		items = raw.Body.Items
+	}
+	if element.Kind != KindNode {
+		element.Springs = []int{0}
+	}
+	for _, item := range items {
+		if item.Spring {
+			element.Springs[len(element.Springs)-1]++
+			continue
+		}
+		converted, err := convertElement(filename, item.Element, element, seen)
 		if err != nil {
 			return nil, err
 		}
 		element.Children = append(element.Children, converted)
+		element.Springs = append(element.Springs, 0)
+	}
+	if element.Kind != KindNode && len(element.Children) == 0 {
+		return nil, diagnostic(filename, raw.Pos, "%s %q must contain at least one child", raw.Kind, raw.ID)
 	}
 	return element, nil
+}
+
+// convertAttributes compiles the generic surface syntax into the typed model.
+// Attribute names and scalar representations should not escape this boundary.
+func convertAttributes(filename string, element *Element, raw *syntaxAttributes) error {
+	if raw == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for _, attribute := range raw.Items {
+		if seen[attribute.Key] {
+			return diagnostic(filename, attribute.Pos, "duplicate attribute %q on %q", attribute.Key, element.ID)
+		}
+		seen[attribute.Key] = true
+		if element.Kind != KindNode || attribute.Key != "spring" {
+			return diagnostic(filename, attribute.Pos, "attribute %q is not supported on %s %q", attribute.Key, element.Kind, element.ID)
+		}
+		enabled, ok := booleanAttribute(attribute.Value)
+		if !ok {
+			return diagnostic(filename, attribute.Pos, "attribute %q on node %q must be a flag or boolean", attribute.Key, element.ID)
+		}
+		element.NodeAttributes.Spring = enabled
+	}
+	if element.Parent == nil && element.NodeAttributes.Spring {
+		return diagnostic(filename, element.position, "root node %q cannot be spring-enabled", element.ID)
+	}
+	return nil
+}
+
+func booleanAttribute(value *syntaxAttributeValue) (bool, bool) {
+	if value == nil {
+		return true, true
+	}
+	if value.Ident == nil {
+		return false, false
+	}
+	switch *value.Ident {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func convertEdge(filename string, raw *syntaxEdge, nodes map[string]*Element) (*Edge, error) {

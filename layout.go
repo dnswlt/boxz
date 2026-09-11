@@ -82,9 +82,12 @@ type layout struct {
 // measured is the bottom-up size of an element. Container side fields are the
 // channel bands reserved inside its rectangle; gaps reserve sibling seams.
 type measured struct {
-	element  *Element
-	w        float64
-	h        float64
+	element *Element
+	w       float64
+	h       float64
+	// growX/growY say whether the subtree can absorb surplus on each axis.
+	growX    bool
+	growY    bool
 	children []*measured
 	gaps     []float64
 	top      float64
@@ -99,12 +102,45 @@ func buildLayout(doc *Document, cfg Config, laneCounts map[string]int, plan *rou
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateSpringSlots(doc.Root); err != nil {
+		return nil, err
+	}
 	m := measureElement(doc.Root, cfg, laneCounts, plan)
 	result := &layout{ByID: make(map[string]*placement), Channels: make(map[string]*channel)}
-	result.Root = placeElement(m, cfg.CanvasMargin, cfg.CanvasMargin, cfg, result)
+	rootSlot := rect{X: cfg.CanvasMargin, Y: cfg.CanvasMargin, W: m.w, H: m.h}
+	result.Root = placeElement(m, rootSlot, cfg, result)
 	result.Width = m.w + 2*cfg.CanvasMargin
 	result.Height = m.h + 2*cfg.CanvasMargin
 	return result, nil
+}
+
+// validateSpringSlots protects the positional spring representation used during
+// placement. A nil slice is the convenient programmatic form for no springs.
+func validateSpringSlots(element *Element) error {
+	if element == nil {
+		return fmt.Errorf("boxz: document has no root element")
+	}
+	if element.Kind == KindNode {
+		if len(element.Springs) != 0 {
+			return fmt.Errorf("boxz: node %q cannot contain spring slots", element.ID)
+		}
+		return nil
+	}
+	want := len(element.Children) + 1
+	if len(element.Springs) != 0 && len(element.Springs) != want {
+		return fmt.Errorf("boxz: %s %q has %d spring slots; want %d", element.Kind, element.ID, len(element.Springs), want)
+	}
+	for _, count := range element.Springs {
+		if count < 0 {
+			return fmt.Errorf("boxz: %s %q has a negative spring count", element.Kind, element.ID)
+		}
+	}
+	for _, child := range element.Children {
+		if err := validateSpringSlots(child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateConfig(cfg Config) error {
@@ -158,6 +194,10 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		if capacity := maxInt(west, east); capacity > 0 {
 			m.h = math.Max(m.h, float64(capacity+1)*cfg.LaneSpacing)
 		}
+		if element.NodeAttributes.Spring && element.Parent != nil {
+			m.growX = element.Parent.Kind == KindHBox
+			m.growY = element.Parent.Kind == KindVBox
+		}
 		return m
 	}
 
@@ -177,7 +217,10 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 				m.w += m.gaps[index]
 			}
 			maxHeight = math.Max(maxHeight, child.h)
+			m.growX = m.growX || child.growX
+			m.growY = m.growY || child.growY
 		}
+		m.growX = m.growX || springCount(element) != 0
 		m.w += 2 * cfg.AlongPadding
 		m.h = m.top + maxHeight + m.bottom
 	} else {
@@ -190,11 +233,48 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 				m.h += m.gaps[index]
 			}
 			maxWidth = math.Max(maxWidth, child.w)
+			m.growX = m.growX || child.growX
+			m.growY = m.growY || child.growY
 		}
+		m.growY = m.growY || springCount(element) != 0
 		m.h += 2 * cfg.AlongPadding
 		m.w = m.left + maxWidth + m.right
 	}
 	return m
+}
+
+func springCount(element *Element) int {
+	total := 0
+	for _, count := range element.Springs {
+		total += count
+	}
+	return total
+}
+
+func springSlot(element *Element, index int) int {
+	if element.Springs == nil {
+		return 0
+	}
+	return element.Springs[index]
+}
+
+// gapSpringCount maps measured gap i (between children i and i+1) to
+// spring slot i+1, since slot 0 is the leading edge of the container.
+func gapSpringCount(element *Element, gapIndex int) int {
+	return springSlot(element, gapIndex+1)
+}
+
+// growthWeight counts equal-weight consumers on a container's stacking axis.
+// A run of adjacent springs retains its count, while a growable child is one
+// spring-like box regardless of how it distributes that space internally.
+func growthWeight(m *measured) int {
+	weight := springCount(m.element)
+	for _, child := range m.children {
+		if (m.element.Kind == KindHBox && child.growX) || (m.element.Kind == KindVBox && child.growY) {
+			weight++
+		}
+	}
+	return weight
 }
 
 func channelBand(cfg Config, lanes int) float64 {
@@ -207,12 +287,12 @@ func seamBand(cfg Config, lanes int) float64 {
 	return math.Max(cfg.ChildGap, needed)
 }
 
-// placeElement turns measured sizes into absolute rectangles and channel center
-// lines while preserving child order.
-func placeElement(m *measured, x, y float64, cfg Config, result *layout) *placement {
+// placeElement arranges an element within its assigned slot. Edge springs may
+// make the element's compact routing rectangle smaller than that slot.
+func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement {
 	p := &placement{
 		Element:  m.element,
-		Rect:     rect{X: x, Y: y, W: m.w, H: m.h},
+		Rect:     slot,
 		Channels: make(map[Side]*channel),
 	}
 	result.ByID[m.element.ID] = p
@@ -221,41 +301,77 @@ func placeElement(m *measured, x, y float64, cfg Config, result *layout) *placem
 	}
 
 	if m.element.Kind == KindHBox {
-		cursor := x + cfg.AlongPadding
-		contentHeight := m.h - m.top - m.bottom
+		unit, leading, trailing := springAllocation(m, slot.W-m.w)
+		p.Rect.X += leading
+		p.Rect.W -= leading + trailing
+		cursor := p.Rect.X + cfg.AlongPadding
+		contentHeight := slot.H - m.top - m.bottom
 		for index, child := range m.children {
-			childY := y + m.top + (contentHeight-child.h)/2
-			p.Children = append(p.Children, placeElement(child, cursor, childY, cfg, result))
-			cursor += child.w
+			childW, childH := child.w, child.h
+			if child.growX {
+				childW += unit
+			}
+			if child.growY {
+				childH = contentHeight
+			}
+			childY := slot.Y + m.top + (contentHeight-childH)/2
+			childSlot := rect{X: cursor, Y: childY, W: childW, H: childH}
+			p.Children = append(p.Children, placeElement(child, childSlot, cfg, result))
+			cursor += childW
 			if index < len(m.gaps) {
-				cursor += m.gaps[index]
+				cursor += m.gaps[index] + float64(gapSpringCount(m.element, index))*unit
 			}
 		}
 		addChannel(result, p, North,
-			point{X: x + cfg.AlongPadding/2, Y: y + m.top/2},
-			point{X: x + m.w - cfg.AlongPadding/2, Y: y + m.top/2})
+			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + m.top/2},
+			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + m.top/2})
 		addChannel(result, p, South,
-			point{X: x + cfg.AlongPadding/2, Y: y + m.h - m.bottom/2},
-			point{X: x + m.w - cfg.AlongPadding/2, Y: y + m.h - m.bottom/2})
+			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2},
+			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2})
 	} else {
-		cursor := y + cfg.AlongPadding
-		contentWidth := m.w - m.left - m.right
+		unit, leading, trailing := springAllocation(m, slot.H-m.h)
+		p.Rect.Y += leading
+		p.Rect.H -= leading + trailing
+		cursor := p.Rect.Y + cfg.AlongPadding
+		contentWidth := slot.W - m.left - m.right
 		for index, child := range m.children {
-			childX := x + m.left + (contentWidth-child.w)/2
-			p.Children = append(p.Children, placeElement(child, childX, cursor, cfg, result))
-			cursor += child.h
+			childW, childH := child.w, child.h
+			if child.growX {
+				childW = contentWidth
+			}
+			if child.growY {
+				childH += unit
+			}
+			childX := slot.X + m.left + (contentWidth-childW)/2
+			childSlot := rect{X: childX, Y: cursor, W: childW, H: childH}
+			p.Children = append(p.Children, placeElement(child, childSlot, cfg, result))
+			cursor += childH
 			if index < len(m.gaps) {
-				cursor += m.gaps[index]
+				cursor += m.gaps[index] + float64(gapSpringCount(m.element, index))*unit
 			}
 		}
 		addChannel(result, p, West,
-			point{X: x + m.left/2, Y: y + cfg.AlongPadding/2},
-			point{X: x + m.left/2, Y: y + m.h - cfg.AlongPadding/2})
+			point{X: slot.X + m.left/2, Y: p.Rect.Y + cfg.AlongPadding/2},
+			point{X: slot.X + m.left/2, Y: p.Rect.Y + p.Rect.H - cfg.AlongPadding/2})
 		addChannel(result, p, East,
-			point{X: x + m.w - m.right/2, Y: y + cfg.AlongPadding/2},
-			point{X: x + m.w - m.right/2, Y: y + m.h - cfg.AlongPadding/2})
+			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + cfg.AlongPadding/2},
+			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + p.Rect.H - cfg.AlongPadding/2})
 	}
 	return p
+}
+
+func springAllocation(m *measured, extra float64) (unit, leading, trailing float64) {
+	unit = growthUnit(extra, growthWeight(m))
+	leading = float64(springSlot(m.element, 0)) * unit
+	trailing = float64(springSlot(m.element, len(m.children))) * unit
+	return unit, leading, trailing
+}
+
+func growthUnit(extra float64, weight int) float64 {
+	if extra <= 0 || weight == 0 {
+		return 0
+	}
+	return extra / float64(weight)
 }
 
 func addChannel(result *layout, owner *placement, side Side, a, b point) {

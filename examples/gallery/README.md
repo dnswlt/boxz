@@ -33,6 +33,8 @@ Debug colors:
 | `07-endpoint-fanout` | Straight exits from separate ports, without local humps |
 | `08-explicit-sides` | N/S constraints honored alongside an automatic E-W route |
 | `09-label-sizing` | Stable routing when labels make nodes different widths |
+| `10-horizontal-springs` | Edge alignment and weighted gap/node growth in rows |
+| `11-vertical-springs` | The transposed spring behavior in columns |
 
 The first comment in each `.boxz` file repeats its visual acceptance criterion,
 so an individual example remains useful outside the contact sheet.

@@ -2,6 +2,8 @@ package boxz
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -68,6 +70,287 @@ edges {}`)
 	}
 	if len(doc.Edges) != 0 {
 		t.Fatalf("edges = %#v, want none", doc.Edges)
+	}
+}
+
+func TestParseSpringsAndNodeAttributes(t *testing.T) {
+	doc, err := ParseString("springs.boxz", `
+hbox root {
+  spring
+  spring
+  node a "A" [spring,]
+  spring
+  node b [spring = false]
+  spring
+  spring
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := doc.Root.Springs, []int{2, 1, 2}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("springs = %v, want %v", got, want)
+	}
+	if !doc.Root.Children[0].NodeAttributes.Spring {
+		t.Fatal("bare spring attribute did not enable node growth")
+	}
+	if doc.Root.Children[1].NodeAttributes.Spring {
+		t.Fatal("spring = false enabled node growth")
+	}
+}
+
+func TestAttributeGrammarAcceptsScalarValuesAndTrailingComma(t *testing.T) {
+	parsed, err := documentParser.ParseString("attributes.boxz", `node root [text = "foo", integer = 17, decimal = -2.5, enabled = true,]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes := parsed.Root.Attributes.Items
+	if len(attributes) != 4 || *attributes[0].Value.String != "foo" || attributes[1].Value.Number.Value != "17" ||
+		!attributes[2].Value.Number.Negative || attributes[2].Value.Number.Value != "2.5" || *attributes[3].Value.Ident != "true" {
+		t.Fatalf("attributes = %#v, want string, integer, decimal, and identifier values", attributes)
+	}
+}
+
+func TestParseRejectsInvalidAttributesAndEmptySpringContainer(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"duplicate":        {`hbox root { node a [spring, spring] }`, "duplicate attribute"},
+		"unknown":          {`hbox root { node a [sprung] }`, "attribute \"sprung\" is not supported"},
+		"invalid spring":   {`hbox root { node a [spring = 1] }`, "must be a flag or boolean"},
+		"container attr":   {`hbox root [spring] { node a }`, "is not supported on hbox"},
+		"only springs":     {`hbox root { spring spring }`, "must contain at least one child"},
+		"spring root node": {`node root [spring]`, "root node \"root\" cannot be spring-enabled"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseString("attributes.boxz", test.source)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want diagnostic containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestBuildLayoutRejectsMalformedSpringSlots(t *testing.T) {
+	child := &Element{Kind: KindNode, ID: "child", Title: "child"}
+	root := &Element{
+		Kind:     KindHBox,
+		ID:       "root",
+		Children: []*Element{child},
+		Springs:  []int{0},
+	}
+	child.Parent = root
+	doc := &Document{Root: root}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = buildLayout(doc, DefaultConfig(), nil, plan)
+	if err == nil || !strings.Contains(err.Error(), "has 1 spring slots; want 2") {
+		t.Fatalf("error = %v, want malformed spring-slot diagnostic", err)
+	}
+}
+
+func TestHorizontalSpringsShareSurplusByWeight(t *testing.T) {
+	doc, err := ParseString("horizontal-springs.boxz", `
+vbox root {
+  hbox flexible {
+    node a "A"
+    spring
+    spring
+    node b "A" [spring]
+  }
+  hbox widthSource {
+    node wide "A title wide enough to establish the row width"
+  }
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
+	baseGap := seamBand(DefaultConfig(), 0)
+	actualGap := b.X - (a.X + a.W)
+	nodeGrowth := b.W - a.W
+	gapGrowth := actualGap - baseGap
+	if nodeGrowth <= 0 || abs(gapGrowth-2*nodeGrowth) > 1e-9 {
+		t.Fatalf("node growth = %g, gap growth = %g; want two springs to receive twice one spring-like node", nodeGrowth, gapGrowth)
+	}
+}
+
+func TestVerticalSpringsShareSurplusByWeight(t *testing.T) {
+	doc, err := ParseString("vertical-springs.boxz", `
+hbox root {
+  vbox flexible {
+    node a "A"
+    spring
+    spring
+    node b "A" [spring]
+  }
+  vbox heightSource {
+    node t1
+    node t2
+    node t3
+    node t4
+  }
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
+	baseGap := seamBand(DefaultConfig(), 0)
+	actualGap := b.Y - (a.Y + a.H)
+	nodeGrowth := b.H - a.H
+	gapGrowth := actualGap - baseGap
+	if nodeGrowth <= 0 || abs(gapGrowth-2*nodeGrowth) > 1e-9 {
+		t.Fatalf("node growth = %g, gap growth = %g; want two springs to receive twice one spring-like node", nodeGrowth, gapGrowth)
+	}
+}
+
+func TestSpringNodeDoesNotGrowAcrossParentAxis(t *testing.T) {
+	doc, err := ParseString("spring-axis.boxz", `
+vbox root {
+  node a "A" [spring]
+  node widthSource "A title wide enough to establish the column width"
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := l.ByID["a"].Rect
+	if abs(a.W-DefaultConfig().MinNodeWidth) > 1e-9 {
+		t.Fatalf("spring node width = %g, want unchanged cross-axis width %g", a.W, DefaultConfig().MinNodeWidth)
+	}
+}
+
+func TestEdgeSpringsAlignCompactRoutingRectangles(t *testing.T) {
+	doc, err := ParseString("edge-springs.boxz", `
+vbox root {
+  hbox start { node a node b spring }
+  hbox end { spring node c node d }
+  hbox center { spring node e node f spring }
+  hbox widthSource { node wide "A title wide enough to establish the row width" }
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := l.ByID["root"]
+	contentLeft := root.Rect.X + (root.Channels[West].A.X-root.Rect.X)*2
+	contentRight := root.Rect.X + root.Rect.W - (root.Rect.X+root.Rect.W-root.Channels[East].A.X)*2
+	start, end, center := l.ByID["start"].Rect, l.ByID["end"].Rect, l.ByID["center"].Rect
+	if abs(start.X-contentLeft) > 1e-9 {
+		t.Fatalf("trailing spring row starts at %g, want content start %g", start.X, contentLeft)
+	}
+	if abs(end.X+end.W-contentRight) > 1e-9 {
+		t.Fatalf("leading spring row ends at %g, want content end %g", end.X+end.W, contentRight)
+	}
+	leftSpace, rightSpace := center.X-contentLeft, contentRight-(center.X+center.W)
+	if abs(leftSpace-rightSpace) > 1e-9 {
+		t.Fatalf("two-sided springs leave %g left and %g right, want centered content", leftSpace, rightSpace)
+	}
+	if abs(start.W-end.W) > 1e-9 || abs(end.W-center.W) > 1e-9 {
+		t.Fatalf("edge springs changed compact routing widths: start=%g end=%g center=%g", start.W, end.W, center.W)
+	}
+}
+
+func TestSpringGrowthPropagatesThroughNestedContainers(t *testing.T) {
+	doc, err := ParseString("nested-springs.boxz", `
+vbox root {
+  vbox wrapper {
+    hbox flexible {
+      node a
+      spring
+      node b
+    }
+  }
+  hbox widthSource {
+    node wide "A title wide enough to establish the outer width"
+  }
+}
+edges {
+  a -> b
+  b -> wide
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
+	if gap := b.X - (a.X + a.W); gap <= seamBand(DefaultConfig(), 0) {
+		t.Fatalf("nested spring gap = %g, want more than its intrinsic seam width", gap)
+	}
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrthogonalPaths(t, output.String())
+}
+
+func TestGalleryAvoidsNodeInteriors(t *testing.T) {
+	filenames, err := filepath.Glob("examples/gallery/*.boxz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filenames) == 0 {
+		t.Fatal("visual gallery contains no boxz examples")
+	}
+	for _, filename := range filenames {
+		t.Run(filename, func(t *testing.T) {
+			source, err := os.ReadFile(filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, err := ParseString(filename, string(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, routes, err := solve(doc, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertNoNodeRectOverlaps(t, l)
+			assertRoutesAvoidOtherNodes(t, l, routes, DefaultConfig())
+		})
 	}
 }
 
@@ -756,6 +1039,68 @@ func assertNoCollinearEdgeOverlaps(t *testing.T, svg string) {
 			}
 		}
 	}
+}
+
+func assertNoNodeRectOverlaps(t *testing.T, l *layout) {
+	t.Helper()
+	var nodes []*placement
+	collectNodePlacements(l.Root, &nodes)
+	for left := range nodes {
+		for right := left + 1; right < len(nodes); right++ {
+			if rectInteriorsOverlap(nodes[left].Rect, nodes[right].Rect) {
+				t.Fatalf("nodes %q and %q overlap: %#v and %#v",
+					nodes[left].Element.ID, nodes[right].Element.ID, nodes[left].Rect, nodes[right].Rect)
+			}
+		}
+	}
+}
+
+func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, cfg Config) {
+	t.Helper()
+	var nodes []*placement
+	collectNodePlacements(l.Root, &nodes)
+	ports := allocatePorts(l, routes)
+	for _, route := range routes.Edges {
+		points := displayRoute(route, routes, ports, cfg)
+		for index := 1; index < len(points); index++ {
+			for _, node := range nodes {
+				if node.Element.ID == route.From || node.Element.ID == route.To {
+					continue
+				}
+				if segmentEntersRectInterior(points[index-1], points[index], node.Rect) {
+					t.Fatalf("route %s -> %s segment %#v -> %#v enters node %q at %#v",
+						route.From, route.To, points[index-1], points[index], node.Element.ID, node.Rect)
+				}
+			}
+		}
+	}
+}
+
+func collectNodePlacements(p *placement, nodes *[]*placement) {
+	if p.Element.Kind == KindNode {
+		*nodes = append(*nodes, p)
+		return
+	}
+	for _, child := range p.Children {
+		collectNodePlacements(child, nodes)
+	}
+}
+
+func rectInteriorsOverlap(left, right rect) bool {
+	return intervalOverlap(left.X, left.X+left.W, right.X, right.X+right.W) > 1e-9 &&
+		intervalOverlap(left.Y, left.Y+left.H, right.Y, right.Y+right.H) > 1e-9
+}
+
+func segmentEntersRectInterior(a, b point, r rect) bool {
+	if a.X == b.X {
+		return a.X > r.X+1e-9 && a.X < r.X+r.W-1e-9 &&
+			intervalOverlap(a.Y, b.Y, r.Y, r.Y+r.H) > 1e-9
+	}
+	if a.Y == b.Y {
+		return a.Y > r.Y+1e-9 && a.Y < r.Y+r.H-1e-9 &&
+			intervalOverlap(a.X, b.X, r.X, r.X+r.W) > 1e-9
+	}
+	return true
 }
 
 func intervalOverlap(a1, a2, b1, b2 float64) float64 {

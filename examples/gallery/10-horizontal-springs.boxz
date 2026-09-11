@@ -1,0 +1,40 @@
+// Edge springs align compact rows; internal springs and spring nodes share horizontal surplus by weight.
+vbox root {
+  hbox widthSource {
+    node ruler "This node establishes the available row width"
+  }
+
+  hbox leftAligned {
+    node l1 "L1"
+    node l2 "L2"
+    spring
+  }
+
+  hbox splitGap {
+    node s1 "S1"
+    spring
+    spring
+    node s2 "S2"
+  }
+
+  hbox growingNodes {
+    node g1 "G1" [spring]
+    spring
+    node g2 "G2" [spring = true,]
+  }
+
+  hbox rightAligned {
+    spring
+    node r1 "R1"
+    node r2 "R2"
+  }
+}
+
+edges {
+  l1 -> s1
+  l2 -> s2
+  s1 -> g2
+  s2 -> g1
+  g1 -> r1
+  g2 -> r2
+}
