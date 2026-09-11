@@ -92,7 +92,9 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 	usage := make(map[string]int)
 	for index, edge := range doc.Edges {
 		if spec := plan.Seams[index]; spec != nil {
-			route, routeErr := routeThroughSeam(l, edge, index, spec, cfg)
+			fromStart := sideCenter(l.ByID[edge.From].Rect, spec.FromSide)
+			toStart := sideCenter(l.ByID[edge.To].Rect, spec.ToSide)
+			route, routeErr := routeThroughSeam(l, edge, index, spec, fromStart, toStart, cfg)
 			if routeErr != nil {
 				return nil, routeErr
 			}
@@ -128,7 +130,7 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 
 // routeThroughSeam projects both endpoints to their shared sibling gap and
 // joins them on one track, or on two tracks connected by a local dogleg.
-func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg Config) (*routedEdge, error) {
+func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, fromStart, toStart point, cfg Config) (*routedEdge, error) {
 	parent := l.ByID[spec.ParentID]
 	if parent == nil || spec.FirstChild+1 >= len(parent.Children) {
 		return nil, fmt.Errorf("boxz: internal routing error: seam %q is missing", spec.ID)
@@ -137,18 +139,20 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, cfg 
 	fromInFirst := containsElement(first.Element, l.ByID[edge.From].Element)
 	firstNode, secondNode := l.ByID[edge.From].Element, l.ByID[edge.To].Element
 	firstSide, secondSide := spec.FromSide, spec.ToSide
+	firstStart, secondStart := fromStart, toStart
 	if !fromInFirst {
 		firstNode, secondNode = secondNode, firstNode
 		firstSide, secondSide = secondSide, firstSide
+		firstStart, secondStart = secondStart, firstStart
 	}
 
 	// Each exposure path projects a nested endpoint outward through its
 	// containers. The seam tracks then join their terminal points.
-	firstPath, ok := exposurePath(first, firstNode, firstSide)
+	firstPath, ok := exposurePath(first, firstNode, firstSide, firstStart)
 	if !ok {
 		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", firstNode.ID, firstSide)
 	}
-	secondPath, ok := exposurePath(second, secondNode, secondSide)
+	secondPath, ok := exposurePath(second, secondNode, secondSide, secondStart)
 	if !ok {
 		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", secondNode.ID, secondSide)
 	}
@@ -217,13 +221,19 @@ func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg
 	return 0
 }
 
-func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, cfg Config) error {
+func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, ports map[portKey]point, cfg Config) error {
 	for index, route := range routes.Edges {
 		spec := plan.Seams[route.EdgeIndex]
 		if spec == nil {
 			continue
 		}
-		rebuilt, err := routeThroughSeam(l, doc.Edges[route.EdgeIndex], route.EdgeIndex, spec, cfg)
+		edge := doc.Edges[route.EdgeIndex]
+		fromPort, fromOK := ports[portKey{node: edge.From, side: spec.FromSide, edge: route.EdgeIndex}]
+		toPort, toOK := ports[portKey{node: edge.To, side: spec.ToSide, edge: route.EdgeIndex, to: true}]
+		if !fromOK || !toOK {
+			return fmt.Errorf("boxz: internal routing error: seam %q has an unallocated port", spec.ID)
+		}
+		rebuilt, err := routeThroughSeam(l, edge, route.EdgeIndex, spec, fromPort, toPort, cfg)
 		if err != nil {
 			return err
 		}
@@ -232,24 +242,15 @@ func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResu
 	return nil
 }
 
-// exposurePath projects a frontier node through every enclosing rectangle up
-// to root's requested side.
-func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
+// exposurePath projects an explicit point on a frontier node through every
+// enclosing rectangle up to root's requested side. Provisional routes pass a
+// side center; final seam reconstruction passes the allocated port.
+func exposurePath(root *placement, node *Element, side Side, start point) ([]point, bool) {
 	if root.Element.Kind == KindNode {
 		if root.Element != node {
 			return nil, false
 		}
-		center := root.Rect.center()
-		switch side {
-		case North:
-			return []point{{X: center.X, Y: root.Rect.Y}}, true
-		case East:
-			return []point{{X: root.Rect.X + root.Rect.W, Y: center.Y}}, true
-		case South:
-			return []point{{X: center.X, Y: root.Rect.Y + root.Rect.H}}, true
-		case West:
-			return []point{{X: root.Rect.X, Y: center.Y}}, true
-		}
+		return []point{start}, true
 	}
 
 	// Follow the unique containing child and extend its path to this container's
@@ -265,7 +266,7 @@ func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 	if child == nil {
 		return nil, false
 	}
-	points, ok := exposurePath(child, node, side)
+	points, ok := exposurePath(child, node, side, start)
 	if !ok {
 		return nil, false
 	}
@@ -293,6 +294,22 @@ func exposurePath(root *placement, node *Element, side Side) ([]point, bool) {
 		points = append(points, destination)
 	}
 	return points, true
+}
+
+func sideCenter(r rect, side Side) point {
+	center := r.center()
+	switch side {
+	case North:
+		return point{X: center.X, Y: r.Y}
+	case East:
+		return point{X: r.X + r.W, Y: center.Y}
+	case South:
+		return point{X: center.X, Y: r.Y + r.H}
+	case West:
+		return point{X: r.X, Y: center.Y}
+	default:
+		return center
+	}
 }
 
 // makeRouteGraph splits channel center lines, hierarchy risers, and sibling

@@ -14,12 +14,11 @@ import (
 // RenderSVG lays out and renders a parsed document as a standalone SVG. Set
 // cfg.Debug to include structural and routing diagnostics.
 func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
-	l, routes, err := solve(doc, cfg)
+	l, routes, ports, err := solve(doc, cfg)
 	if err != nil {
 		return err
 	}
 
-	ports := allocatePorts(l, routes)
 	displayRoutes := make([][]point, len(routes.Edges))
 	for index, route := range routes.Edges {
 		displayRoutes[index] = displayRoute(route, routes, ports, cfg)
@@ -198,10 +197,10 @@ func clamp(value, low, high float64) float64 {
 
 // solve alternates layout and routing until every outer channel and sibling
 // seam has enough room for the tracks assigned to it.
-func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
+func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point, error) {
 	plan, err := buildRoutingPlan(doc)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// Outer-channel and cyclic-seam demand is only known after routing, while
 	// routing needs coordinates. Rebuild until every track fits. Allocations only
@@ -210,11 +209,11 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 	for iteration := 0; iteration < len(doc.Edges)*2+4; iteration++ {
 		l, err := buildLayout(doc, cfg, allocated, plan)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		routes, err := routeDocument(doc, l, plan, cfg)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		grew := false
 		for channelName, count := range routes.LaneCounts {
@@ -226,20 +225,20 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, error) {
 		ports := allocatePorts(l, routes)
 		seamGrew, err := assignSeamTracks(doc, l, plan, ports, cfg)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		grew = grew || seamGrew
 		if !grew {
-			if err := rerouteSeams(doc, l, plan, routes, cfg); err != nil {
-				return nil, nil, err
+			if err := rerouteSeams(doc, l, plan, routes, ports, cfg); err != nil {
+				return nil, nil, nil, err
 			}
 			if err := assignCrossbarTracks(doc, l, plan, routes, ports, cfg); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			return l, routes, nil
+			return l, routes, ports, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("boxz: routing-space sizing did not converge")
+	return nil, nil, nil, fmt.Errorf("boxz: routing-space sizing did not converge")
 }
 
 type portKey struct {

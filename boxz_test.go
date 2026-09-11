@@ -404,7 +404,7 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, _, err := solve(doc, DefaultConfig())
+	l, _, _, err := solve(doc, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,12 +437,14 @@ func TestGalleryAvoidsNodeInteriors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			l, routes, err := solve(doc, DefaultConfig())
+			l, routes, ports, err := solve(doc, DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertNoNodeRectOverlaps(t, l)
-			assertRoutesAvoidOtherNodes(t, l, routes, DefaultConfig())
+			assertRoutesAvoidOtherNodes(t, l, routes, ports, DefaultConfig())
+			assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
+			assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
 		})
 	}
 }
@@ -472,11 +474,10 @@ edges {
 	if got := plan.SeamTrackCount[seamID("root", 1)]; got != 2 {
 		t.Fatalf("seam lane count = %d, want 2", got)
 	}
-	l, routes, err := solve(doc, DefaultConfig())
+	_, _, ports, err := solve(doc, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ports := allocatePorts(l, routes)
 	var bPorts []point
 	for key, p := range ports {
 		if key.node == "b" {
@@ -485,6 +486,60 @@ edges {
 	}
 	if len(bPorts) != 2 || bPorts[0] == bPorts[1] {
 		t.Fatalf("ports for b = %#v, want two distinct ports", bPorts)
+	}
+}
+
+func TestSeamRoutesUseFinalPortsWithoutBorderSlides(t *testing.T) {
+	tests := map[string]string{
+		"horizontal fan-in": `
+hbox root {
+  vbox left { node x "X" node a "A" node y "Y" }
+  node b "B"
+}
+edges { a -> b x -> b y -> b }
+`,
+		"vertical fan-in": `
+vbox root {
+  hbox top { node x "X" node a "A" node y "Y" }
+  node b "B"
+}
+edges { a -> b x -> b y -> b }
+`,
+		"reversed nested seam": `
+hbox root {
+  vbox left { node x "X" node a "A" node y "Y" }
+  node b "B"
+}
+edges { b -> a b -> x b -> y }
+`,
+	}
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			doc, err := ParseString("min-border-slide.boxz", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, routes, ports, err := solve(doc, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, route := range routes.Edges {
+				fromPort := ports[portKey{node: route.From, side: route.FromSide, edge: route.EdgeIndex}]
+				toPort := ports[portKey{node: route.To, side: route.ToSide, edge: route.EdgeIndex, to: true}]
+				if route.Points[0] != fromPort || route.Points[len(route.Points)-1] != toPort {
+					t.Fatalf("raw seam route %s -> %s endpoints = %v/%v, want ports %v/%v",
+						route.From, route.To, route.Points[0], route.Points[len(route.Points)-1], fromPort, toPort)
+				}
+			}
+			assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
+			assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+
+			var output bytes.Buffer
+			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+				t.Fatal(err)
+			}
+			assertNoCollinearEdgeOverlaps(t, output.String())
+		})
 	}
 }
 
@@ -961,7 +1016,7 @@ edges {
 			if plan.Seams[0] != nil {
 				t.Fatalf("route unexpectedly classified as a direct seam: %#v", plan.Seams[0])
 			}
-			_, routes, err := solve(doc, DefaultConfig())
+			_, routes, _, err := solve(doc, DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1107,11 +1162,10 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, routes, err := solve(doc, DefaultConfig())
+	l, routes, ports, err := solve(doc, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ports := allocatePorts(l, routes)
 	var points []point
 	for _, route := range routes.Edges {
 		if route.From == "e1" && route.To == "w3" {
@@ -1202,11 +1256,10 @@ func assertNoNodeRectOverlaps(t *testing.T, l *layout) {
 	}
 }
 
-func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, cfg Config) {
+func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg Config) {
 	t.Helper()
 	var nodes []*placement
 	collectNodePlacements(l.Root, &nodes)
-	ports := allocatePorts(l, routes)
 	for _, route := range routes.Edges {
 		points := displayRoute(route, routes, ports, cfg)
 		for index := 1; index < len(points); index++ {
@@ -1220,6 +1273,71 @@ func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, c
 				}
 			}
 		}
+	}
+}
+
+func assertRoutesMeetPortsCleanly(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg Config) {
+	t.Helper()
+	for _, route := range routes.Edges {
+		points := displayRoute(route, routes, ports, cfg)
+		if len(points) < 2 {
+			t.Fatalf("route %s -> %s has fewer than two display points: %v", route.From, route.To, points)
+		}
+		fromPort := ports[portKey{node: route.From, side: route.FromSide, edge: route.EdgeIndex}]
+		toPort := ports[portKey{node: route.To, side: route.ToSide, edge: route.EdgeIndex, to: true}]
+		if points[0] != fromPort || points[len(points)-1] != toPort {
+			t.Fatalf("display route %s -> %s endpoints = %v/%v, want ports %v/%v",
+				route.From, route.To, points[0], points[len(points)-1], fromPort, toPort)
+		}
+		if !endpointSegmentIsPerpendicular(fromPort, points[1], l.ByID[route.From].Rect, route.FromSide) {
+			t.Fatalf("route %s -> %s leaves side %s along the node border: %v",
+				route.From, route.To, route.FromSide, points[:2])
+		}
+		last := len(points) - 1
+		if !endpointSegmentIsPerpendicular(toPort, points[last-1], l.ByID[route.To].Rect, route.ToSide) {
+			t.Fatalf("route %s -> %s enters side %s along the node border: %v",
+				route.From, route.To, route.ToSide, points[last-1:])
+		}
+	}
+}
+
+func assertNoDisplayRouteOverlaps(t *testing.T, routes *routeResult, ports map[portKey]point, cfg Config, tolerance float64) {
+	t.Helper()
+	display := make([][]point, len(routes.Edges))
+	for index, route := range routes.Edges {
+		display[index] = displayRoute(route, routes, ports, cfg)
+	}
+	for left := range display {
+		for right := left + 1; right < len(display); right++ {
+			for leftIndex := 1; leftIndex < len(display[left]); leftIndex++ {
+				la, lb := display[left][leftIndex-1], display[left][leftIndex]
+				for rightIndex := 1; rightIndex < len(display[right]); rightIndex++ {
+					ra, rb := display[right][rightIndex-1], display[right][rightIndex]
+					vertical := sameCoordinate(la.X, lb.X) && sameCoordinate(ra.X, rb.X) && sameCoordinate(la.X, ra.X) &&
+						intervalOverlap(la.Y, lb.Y, ra.Y, rb.Y) > tolerance
+					horizontal := sameCoordinate(la.Y, lb.Y) && sameCoordinate(ra.Y, rb.Y) && sameCoordinate(la.Y, ra.Y) &&
+						intervalOverlap(la.X, lb.X, ra.X, rb.X) > tolerance
+					if vertical || horizontal {
+						t.Fatalf("display routes %d and %d overlap: %v and %v", left, right, display[left], display[right])
+					}
+				}
+			}
+		}
+	}
+}
+
+func endpointSegmentIsPerpendicular(port, outside point, node rect, side Side) bool {
+	switch side {
+	case North:
+		return sameCoordinate(port.Y, node.Y) && sameCoordinate(port.X, outside.X) && outside.Y < port.Y
+	case East:
+		return sameCoordinate(port.X, node.X+node.W) && sameCoordinate(port.Y, outside.Y) && outside.X > port.X
+	case South:
+		return sameCoordinate(port.Y, node.Y+node.H) && sameCoordinate(port.X, outside.X) && outside.Y > port.Y
+	case West:
+		return sameCoordinate(port.X, node.X) && sameCoordinate(port.Y, outside.Y) && outside.X < port.X
+	default:
+		return false
 	}
 }
 

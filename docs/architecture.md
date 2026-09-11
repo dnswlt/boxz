@@ -24,9 +24,11 @@ More precisely, one iteration:
 3. chooses exact node ports and solves seam-local track ordering;
 4. repeats if any outer channel or seam needs more tracks.
 
-Once allocations are stable, seam paths are rebuilt against the final geometry
-and movable sibling crossbars receive their physical coordinates. SVG rendering
-then converts the abstract routes into display paths.
+Once allocations are stable, seam paths are rebuilt from the final allocated
+ports and movable sibling crossbars receive their physical coordinates. The
+solver returns that same port map with the layout and routes, so SVG rendering
+cannot accidentally allocate a different set. It then converts the abstract
+routes into display paths.
 
 The implementation follows those phase boundaries:
 
@@ -127,6 +129,12 @@ second-child tracks. Each edge changes banks at a private dogleg coordinate.
 Only this seam grows to fit the additional tracks; the surrounding layout and
 node order remain unchanged.
 
+Provisional seam paths start at node-side centers because exact ports do not
+exist until all endpoint sides are known. Final seam reconstruction calls the
+same recursive exposure operation with allocated ports instead. Consequently,
+access legs change direction on their seam tracks rather than being repaired
+along a node border during display.
+
 ## Measurement and placement
 
 `layout.go` first measures minimum sizes and growth capabilities bottom-up, then
@@ -216,10 +224,12 @@ Collinear graph segments are merged into straight runs before lane offsets are
 applied. This is important: offsetting a channel segment separately from an
 adjacent collinear riser would create a small, meaningless jog.
 
-At each endpoint, the final path reconnects the first or last offset run to its
-exact node port with an orthogonal projection. Duplicate points and redundant
-collinear points are then removed. Arrowheads and styling are SVG concerns and
-do not participate in layout or routing.
+At each outer-route endpoint, the final path reconnects the first or last
+offset run to its exact node port with an orthogonal projection. Final seam
+paths already start and end at their allocated ports, making this projection a
+no-op for them. Duplicate points and redundant collinear points are then
+removed. Arrowheads and styling are SVG concerns and do not participate in
+layout or routing.
 
 Container labels are also a display concern after their fixed strip has been
 reserved. Once lane-offset display routes are known, an automatically aligned
@@ -255,6 +265,12 @@ sibling crossbars use distinct classes and colors. Named resources also carry
 - Outer routes use only the finite structural routing graph; they do not gain
   geometric shortcuts from accidental alignment.
 - Seam track ordering depends only on final port alignment within that seam.
+- Final seam paths begin and end at the same allocated ports returned to the
+  renderer.
+- Every display route leaves and enters its endpoint perpendicular to the node
+  side; no endpoint segment runs along a node border.
+- Distinct display routes do not share a collinear segment longer than the
+  rendering tolerance.
 - Sibling crossbars connect routing networks, never arbitrary visible points or
   node interiors.
 - Direct seam access coordinates and movable crossbar tracks cannot coincide.

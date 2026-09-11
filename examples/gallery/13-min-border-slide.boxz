@@ -1,0 +1,15 @@
+// Inspect: three fan-in seams use their exact B ports and never slide vertically along B's west border.
+hbox root {
+  vbox left {
+    node x "X"
+    node a "A"
+    node y "Y"
+  }
+  node b "B"
+}
+
+edges {
+  a -> b
+  x -> b
+  y -> b
+}

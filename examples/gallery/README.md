@@ -36,6 +36,7 @@ Debug colors:
 | `10-horizontal-springs` | Edge alignment and weighted gap/node growth in rows |
 | `11-vertical-springs` | The transposed spring behavior in columns |
 | `12-container-labels` | Visible group strips, crossing avoidance, alignment, and truncation |
+| `13-min-border-slide` | Exact seam ports without endpoint legs along node borders |
 
 The first comment in each `.boxz` file repeats its visual acceptance criterion,
 so an individual example remains useful outside the contact sheet.
