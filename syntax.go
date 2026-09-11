@@ -23,6 +23,23 @@ type NodeAttributes struct {
 	Spring bool
 }
 
+// LabelAlignment controls the horizontal placement of a container label.
+// The zero value, like LabelAlignAuto, selects automatic placement.
+type LabelAlignment string
+
+const (
+	LabelAlignAuto   LabelAlignment = "auto"
+	LabelAlignLeft   LabelAlignment = "left"
+	LabelAlignCenter LabelAlignment = "center"
+	LabelAlignRight  LabelAlignment = "right"
+)
+
+// ContainerAttributes contains the validated attributes available to layout
+// containers. Containers remain structural and cannot be edge endpoints.
+type ContainerAttributes struct {
+	LabelAlign LabelAlignment
+}
+
 // Side identifies one side of a node or layout box.
 type Side string
 
@@ -41,11 +58,12 @@ type Document struct {
 
 // Element is either a visible node or an ordered layout container.
 type Element struct {
-	Kind           Kind
-	ID             string
-	Title          string
-	NodeAttributes NodeAttributes
-	Children       []*Element
+	Kind                Kind
+	ID                  string
+	Title               string
+	NodeAttributes      NodeAttributes
+	ContainerAttributes ContainerAttributes
+	Children            []*Element
 	// Springs has one entry before each child and one after the last child.
 	// Its value is the number of equal-weight springs in that gap; nil means none.
 	Springs  []int
@@ -194,7 +212,7 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 		}
 	case KindHBox, KindVBox:
 		if raw.Title != nil {
-			return nil, diagnostic(filename, raw.Pos, "%s %q cannot have a title", raw.Kind, raw.ID)
+			element.Title = *raw.Title
 		}
 	default:
 		return nil, diagnostic(filename, raw.Pos, "unknown element kind %q", raw.Kind)
@@ -240,17 +258,28 @@ func convertAttributes(filename string, element *Element, raw *syntaxAttributes)
 			return diagnostic(filename, attribute.Pos, "duplicate attribute %q on %q", attribute.Key, element.ID)
 		}
 		seen[attribute.Key] = true
-		if element.Kind != KindNode || attribute.Key != "spring" {
+		switch {
+		case element.Kind == KindNode && attribute.Key == "spring":
+			enabled, ok := booleanAttribute(attribute.Value)
+			if !ok {
+				return diagnostic(filename, attribute.Pos, "attribute %q on node %q must be a flag or boolean", attribute.Key, element.ID)
+			}
+			element.NodeAttributes.Spring = enabled
+		case element.Kind != KindNode && attribute.Key == "labelAlign":
+			alignment, ok := labelAlignAttribute(attribute.Value)
+			if !ok {
+				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be auto, left, center, or right", attribute.Key, element.Kind, element.ID)
+			}
+			element.ContainerAttributes.LabelAlign = alignment
+		default:
 			return diagnostic(filename, attribute.Pos, "attribute %q is not supported on %s %q", attribute.Key, element.Kind, element.ID)
 		}
-		enabled, ok := booleanAttribute(attribute.Value)
-		if !ok {
-			return diagnostic(filename, attribute.Pos, "attribute %q on node %q must be a flag or boolean", attribute.Key, element.ID)
-		}
-		element.NodeAttributes.Spring = enabled
 	}
 	if element.Parent == nil && element.NodeAttributes.Spring {
 		return diagnostic(filename, element.position, "root node %q cannot be spring-enabled", element.ID)
+	}
+	if element.Kind != KindNode && element.Title == "" && element.ContainerAttributes.LabelAlign != "" {
+		return diagnostic(filename, element.position, "%s %q has labelAlign but no title", element.Kind, element.ID)
 	}
 	return nil
 }
@@ -269,6 +298,24 @@ func booleanAttribute(value *syntaxAttributeValue) (bool, bool) {
 		return false, true
 	default:
 		return false, false
+	}
+}
+
+func labelAlignAttribute(value *syntaxAttributeValue) (LabelAlignment, bool) {
+	if value == nil || value.Ident == nil {
+		return "", false
+	}
+	switch strings.ToLower(*value.Ident) {
+	case string(LabelAlignAuto):
+		return LabelAlignAuto, true
+	case string(LabelAlignLeft):
+		return LabelAlignLeft, true
+	case string(LabelAlignCenter):
+		return LabelAlignCenter, true
+	case string(LabelAlignRight):
+		return LabelAlignRight, true
+	default:
+		return "", false
 	}
 }
 

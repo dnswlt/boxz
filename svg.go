@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // RenderSVG lays out and renders a parsed document as a standalone SVG. Set
@@ -18,6 +20,11 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	}
 
 	ports := allocatePorts(l, routes)
+	displayRoutes := make([][]point, len(routes.Edges))
+	for index, route := range routes.Edges {
+		displayRoutes[index] = displayRoute(route, routes, ports, cfg)
+	}
+	labels := placeGroupLabels(l.Root, displayRoutes, cfg)
 	var svg strings.Builder
 	fmt.Fprintf(&svg, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%s" height="%s">`, number(l.Width), number(l.Height), number(l.Width), number(l.Height))
 	svg.WriteString("\n  <defs>\n")
@@ -27,6 +34,9 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	svg.WriteString("    <style>\n")
 	svg.WriteString("      .boxz-node { fill: #ffffff; stroke: #334155; stroke-width: 1.5; }\n")
 	svg.WriteString("      .boxz-title { fill: #0f172a; font: 14px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }\n")
+	svg.WriteString("      .boxz-group-boundary { fill: none; stroke: #94a3b8; stroke-width: 1; }\n")
+	svg.WriteString("      .boxz-group-label-bg { fill: #ffffff; fill-opacity: 0.6; }\n")
+	svg.WriteString("      .boxz-group-title { fill: #334155; font: 13px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }\n")
 	svg.WriteString("      .boxz-edge { fill: none; stroke: #475569; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; marker-end: url(#arrow); }\n")
 	if cfg.Debug {
 		svg.WriteString("      .boxz-container { fill: none; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 4 4; }\n")
@@ -46,15 +56,20 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 		writeContainers(&svg, l.Root)
 		svg.WriteString("  </g>\n")
 	}
+	svg.WriteString("  <g class=\"boxz-groups\">\n")
+	writeGroups(&svg, l.Root)
+	svg.WriteString("  </g>\n")
 	svg.WriteString("  <g class=\"boxz-edges\">\n")
-	for _, route := range routes.Edges {
+	for index, route := range routes.Edges {
 		edge := doc.Edges[route.EdgeIndex]
-		points := displayRoute(route, routes, ports, cfg)
 		fmt.Fprintf(&svg, "    <path class=\"boxz-edge\" data-from=\"%s\" data-to=\"%s\" d=\"%s\"/>\n",
-			html.EscapeString(edge.From), html.EscapeString(edge.To), svgPath(points))
+			html.EscapeString(edge.From), html.EscapeString(edge.To), svgPath(displayRoutes[index]))
 	}
 	svg.WriteString("  </g>\n  <g class=\"boxz-nodes\">\n")
 	writeNodes(&svg, l.Root)
+	svg.WriteString("  </g>\n")
+	svg.WriteString("  <g class=\"boxz-group-labels\">\n")
+	writeGroupLabels(&svg, labels)
 	svg.WriteString("  </g>\n")
 	if cfg.Debug {
 		svg.WriteString("  <g class=\"boxz-debug-ports\">\n")
@@ -64,6 +79,121 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	svg.WriteString("</svg>\n")
 	_, err = io.WriteString(w, svg.String())
 	return err
+}
+
+type groupLabel struct {
+	container string
+	fullText  string
+	text      string
+	rect      rect
+}
+
+// placeGroupLabels is a post-routing display pass. Labels reserve vertical
+// space during layout but never become obstacles or influence route selection.
+func placeGroupLabels(root *placement, routes [][]point, cfg Config) []groupLabel {
+	var labels []groupLabel
+	var visit func(*placement)
+	visit = func(p *placement) {
+		if p.Element.Kind != KindNode && p.Element.Title != "" {
+			strip := p.LabelStrip
+			desired := float64(utf8.RuneCountInString(p.Element.Title))*cfg.CharacterWidth + 2*cfg.GroupLabelPaddingX
+			width := math.Min(strip.W, desired)
+			width = math.Max(0, width)
+			x := alignedLabelX(strip, width, p.Element.ContainerAttributes.LabelAlign, routes)
+			labels = append(labels, groupLabel{
+				container: p.Element.ID,
+				fullText:  p.Element.Title,
+				text:      truncateGroupTitle(p.Element.Title, width, cfg),
+				rect:      rect{X: x, Y: strip.Y, W: width, H: strip.H},
+			})
+		}
+		for _, child := range p.Children {
+			visit(child)
+		}
+	}
+	visit(root)
+	return labels
+}
+
+func alignedLabelX(strip rect, width float64, alignment LabelAlignment, routes [][]point) float64 {
+	switch alignment {
+	case LabelAlignCenter:
+		return strip.X + (strip.W-width)/2
+	case LabelAlignRight:
+		return strip.X + strip.W - width
+	case LabelAlignLeft:
+		return strip.X
+	default:
+		return automaticLabelX(strip, width, routes)
+	}
+}
+
+// automaticLabelX sweeps the positions where a route starts or stops
+// intersecting the backing rectangle, then chooses the least-covered position.
+// Candidate and route order are stable, and equal scores prefer the left edge.
+func automaticLabelX(strip rect, width float64, routes [][]point) float64 {
+	const clearance = 1.0
+	left, right := strip.X, strip.X+strip.W-width
+	candidates := []float64{left, right}
+	for _, route := range routes {
+		for index := 0; index+1 < len(route); index++ {
+			a, b := route[index], route[index+1]
+			minY, maxY := math.Min(a.Y, b.Y), math.Max(a.Y, b.Y)
+			if maxY+clearance <= strip.Y || minY-clearance >= strip.Y+strip.H {
+				continue
+			}
+			minX, maxX := math.Min(a.X, b.X), math.Max(a.X, b.X)
+			candidates = append(candidates,
+				clamp(minX-clearance-width, left, right),
+				clamp(maxX+clearance, left, right),
+			)
+		}
+	}
+	sort.Float64s(candidates)
+	bestX, bestScore := left, math.MaxInt
+	for _, candidate := range candidates {
+		score := labelCrossingScore(rect{X: candidate, Y: strip.Y, W: width, H: strip.H}, routes, clearance)
+		if score < bestScore {
+			bestX, bestScore = candidate, score
+		}
+	}
+	return bestX
+}
+
+func labelCrossingScore(label rect, routes [][]point, clearance float64) int {
+	score := 0
+	for _, route := range routes {
+		for index := 0; index+1 < len(route); index++ {
+			a, b := route[index], route[index+1]
+			minX, maxX := math.Min(a.X, b.X), math.Max(a.X, b.X)
+			minY, maxY := math.Min(a.Y, b.Y), math.Max(a.Y, b.Y)
+			if maxX+clearance > label.X && minX-clearance < label.X+label.W &&
+				maxY+clearance > label.Y && minY-clearance < label.Y+label.H {
+				score++
+			}
+		}
+	}
+	return score
+}
+
+func truncateGroupTitle(title string, width float64, cfg Config) string {
+	available := math.Max(0, width-2*cfg.GroupLabelPaddingX)
+	if float64(utf8.RuneCountInString(title))*cfg.CharacterWidth <= available {
+		return title
+	}
+	capacity := int(available / cfg.CharacterWidth)
+	if capacity <= 0 {
+		return ""
+	}
+	if capacity == 1 {
+		return "…"
+	}
+	runes := []rune(title)
+	return string(runes[:capacity-1]) + "…"
+}
+
+func clamp(value, low, high float64) float64 {
+	return math.Max(low, math.Min(high, value))
 }
 
 // solve alternates layout and routing until every outer channel and sibling
@@ -281,6 +411,35 @@ func writeNodes(svg *strings.Builder, p *placement) {
 	}
 	for _, child := range p.Children {
 		writeNodes(svg, child)
+	}
+}
+
+func writeGroups(svg *strings.Builder, p *placement) {
+	if p.Element.Kind == KindNode {
+		return
+	}
+	if p.Element.Title != "" {
+		fmt.Fprintf(svg, "    <rect class=\"boxz-group-boundary\" data-container=\"%s\" data-kind=\"%s\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"/>\n",
+			html.EscapeString(p.Element.ID), p.Element.Kind,
+			number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))
+	}
+	for _, child := range p.Children {
+		writeGroups(svg, child)
+	}
+}
+
+func writeGroupLabels(svg *strings.Builder, labels []groupLabel) {
+	for _, label := range labels {
+		center := label.rect.center()
+		fmt.Fprintf(svg, "    <g class=\"boxz-group-label\" data-container=\"%s\">\n", html.EscapeString(label.container))
+		fmt.Fprintf(svg, "      <title>%s</title>\n", html.EscapeString(label.fullText))
+		fmt.Fprintf(svg, "      <rect class=\"boxz-group-label-bg\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"/>\n",
+			number(label.rect.X), number(label.rect.Y), number(label.rect.W), number(label.rect.H))
+		if label.text != "" {
+			fmt.Fprintf(svg, "      <text class=\"boxz-group-title\" x=\"%s\" y=\"%s\">%s</text>\n",
+				number(center.X), number(center.Y), html.EscapeString(label.text))
+		}
+		svg.WriteString("    </g>\n")
 	}
 }
 

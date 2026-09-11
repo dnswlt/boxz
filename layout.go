@@ -10,36 +10,40 @@ import (
 // constants used by the MVP.
 type Config struct {
 	// Debug adds diagnostic SVG layers without changing layout or routing.
-	Debug          bool
-	CharacterWidth float64
-	LineHeight     float64
-	NodePaddingX   float64
-	NodePaddingY   float64
-	MinNodeWidth   float64
-	MinNodeHeight  float64
-	ChildGap       float64
-	AlongPadding   float64
-	ChannelSize    float64
-	ChannelPadding float64
-	LaneSpacing    float64
-	CanvasMargin   float64
+	Debug              bool
+	CharacterWidth     float64
+	LineHeight         float64
+	NodePaddingX       float64
+	NodePaddingY       float64
+	GroupLabelPaddingX float64
+	GroupLabelPaddingY float64
+	MinNodeWidth       float64
+	MinNodeHeight      float64
+	ChildGap           float64
+	AlongPadding       float64
+	ChannelSize        float64
+	ChannelPadding     float64
+	LaneSpacing        float64
+	CanvasMargin       float64
 }
 
 // DefaultConfig returns conservative dimensions suitable for the bundled SVG style.
 func DefaultConfig() Config {
 	return Config{
-		CharacterWidth: 8,
-		LineHeight:     18,
-		NodePaddingX:   16,
-		NodePaddingY:   11,
-		MinNodeWidth:   64,
-		MinNodeHeight:  40,
-		ChildGap:       48,
-		AlongPadding:   24,
-		ChannelSize:    28,
-		ChannelPadding: 7,
-		LaneSpacing:    8,
-		CanvasMargin:   20,
+		CharacterWidth:     8,
+		LineHeight:         18,
+		NodePaddingX:       16,
+		NodePaddingY:       11,
+		GroupLabelPaddingX: 8,
+		GroupLabelPaddingY: 5,
+		MinNodeWidth:       64,
+		MinNodeHeight:      40,
+		ChildGap:           48,
+		AlongPadding:       24,
+		ChannelSize:        28,
+		ChannelPadding:     7,
+		LaneSpacing:        8,
+		CanvasMargin:       20,
 	}
 }
 
@@ -65,10 +69,11 @@ type channel struct {
 }
 
 type placement struct {
-	Element  *Element
-	Rect     rect
-	Children []*placement
-	Channels map[Side]*channel
+	Element    *Element
+	Rect       rect
+	LabelStrip rect
+	Children   []*placement
+	Channels   map[Side]*channel
 }
 
 type layout struct {
@@ -94,6 +99,7 @@ type measured struct {
 	right    float64
 	bottom   float64
 	left     float64
+	label    float64
 }
 
 // buildLayout separates bottom-up measurement from top-down placement so child
@@ -150,6 +156,7 @@ func validateConfig(cfg Config) error {
 	}{
 		{"CharacterWidth", cfg.CharacterWidth}, {"LineHeight", cfg.LineHeight},
 		{"NodePaddingX", cfg.NodePaddingX}, {"NodePaddingY", cfg.NodePaddingY},
+		{"GroupLabelPaddingX", cfg.GroupLabelPaddingX}, {"GroupLabelPaddingY", cfg.GroupLabelPaddingY},
 		{"MinNodeWidth", cfg.MinNodeWidth}, {"MinNodeHeight", cfg.MinNodeHeight},
 		{"ChildGap", cfg.ChildGap}, {"AlongPadding", cfg.AlongPadding},
 		{"ChannelSize", cfg.ChannelSize}, {"ChannelPadding", cfg.ChannelPadding},
@@ -204,6 +211,9 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 	for _, child := range element.Children {
 		m.children = append(m.children, measureElement(child, cfg, lanes, plan))
 	}
+	if element.Title != "" {
+		m.label = cfg.LineHeight + 2*cfg.GroupLabelPaddingY
+	}
 	for index := 0; index+1 < len(element.Children); index++ {
 		m.gaps = append(m.gaps, seamBand(cfg, plan.SeamTrackCount[seamID(element.ID, index)]))
 	}
@@ -222,7 +232,7 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		}
 		m.growX = m.growX || springCount(element) != 0
 		m.w += 2 * cfg.AlongPadding
-		m.h = m.top + maxHeight + m.bottom
+		m.h = m.top + m.label + maxHeight + m.bottom
 	} else {
 		m.left = channelBand(cfg, lanes[channelID(element.ID, West)])
 		m.right = channelBand(cfg, lanes[channelID(element.ID, East)])
@@ -237,7 +247,7 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 			m.growY = m.growY || child.growY
 		}
 		m.growY = m.growY || springCount(element) != 0
-		m.h += 2 * cfg.AlongPadding
+		m.h += 2*cfg.AlongPadding + m.label
 		m.w = m.left + maxWidth + m.right
 	}
 	return m
@@ -305,7 +315,15 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 		p.Rect.X += leading
 		p.Rect.W -= leading + trailing
 		cursor := p.Rect.X + cfg.AlongPadding
-		contentHeight := slot.H - m.top - m.bottom
+		contentHeight := slot.H - m.top - m.label - m.bottom
+		if m.label != 0 {
+			p.LabelStrip = rect{
+				X: p.Rect.X + cfg.AlongPadding,
+				Y: slot.Y,
+				W: p.Rect.W - 2*cfg.AlongPadding,
+				H: m.label,
+			}
+		}
 		for index, child := range m.children {
 			childW, childH := child.w, child.h
 			if child.growX {
@@ -314,7 +332,7 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 			if child.growY {
 				childH = contentHeight
 			}
-			childY := slot.Y + m.top + (contentHeight-childH)/2
+			childY := slot.Y + m.label + m.top + (contentHeight-childH)/2
 			childSlot := rect{X: cursor, Y: childY, W: childW, H: childH}
 			p.Children = append(p.Children, placeElement(child, childSlot, cfg, result))
 			cursor += childW
@@ -323,8 +341,8 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 			}
 		}
 		addChannel(result, p, North,
-			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + m.top/2},
-			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + m.top/2})
+			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + m.label + m.top/2},
+			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + m.label + m.top/2})
 		addChannel(result, p, South,
 			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2},
 			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2})
@@ -332,8 +350,16 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 		unit, leading, trailing := springAllocation(m, slot.H-m.h)
 		p.Rect.Y += leading
 		p.Rect.H -= leading + trailing
-		cursor := p.Rect.Y + cfg.AlongPadding
+		cursor := p.Rect.Y + cfg.AlongPadding + m.label
 		contentWidth := slot.W - m.left - m.right
+		if m.label != 0 {
+			p.LabelStrip = rect{
+				X: slot.X + m.left,
+				Y: p.Rect.Y,
+				W: contentWidth,
+				H: m.label,
+			}
+		}
 		for index, child := range m.children {
 			childW, childH := child.w, child.h
 			if child.growX {

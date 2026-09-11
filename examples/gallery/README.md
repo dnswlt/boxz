@@ -35,6 +35,7 @@ Debug colors:
 | `09-label-sizing` | Stable routing when labels make nodes different widths |
 | `10-horizontal-springs` | Edge alignment and weighted gap/node growth in rows |
 | `11-vertical-springs` | The transposed spring behavior in columns |
+| `12-container-labels` | Visible group strips, crossing avoidance, alignment, and truncation |
 
 The first comment in each `.boxz` file repeats its visual acceptance criterion,
 so an individual example remains useful outside the contact sheet.

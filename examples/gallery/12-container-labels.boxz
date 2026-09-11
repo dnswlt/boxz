@@ -1,0 +1,28 @@
+// Inspect: visible nested groups reserve top strips; auto labels avoid risers while explicit alignment and truncation stay predictable.
+vbox system "Order processing system" [labelAlign = center] {
+  hbox ingress "Ingress routes choose a quiet label position" {
+    node client "Client"
+    node gateway "Gateway"
+    node admin "Admin"
+  }
+  hbox services "Services" [labelAlign = auto] {
+    node api "API"
+    node worker "Worker"
+    node scheduler "Scheduler"
+  }
+  hbox data "A deliberately overlong right-aligned data-services title" [labelAlign = right] {
+    node database "Database"
+    node cache "Cache"
+    node queue "Queue"
+  }
+}
+
+edges {
+  client -> api
+  gateway -> worker
+  admin -> scheduler
+  api -> database
+  worker -> cache
+  scheduler -> queue
+  cache -> client
+}

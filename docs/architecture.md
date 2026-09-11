@@ -42,15 +42,17 @@ The implementation follows those phase boundaries:
 
 An `hbox` lays out children from west to east and owns outer channels on its
 north and south sides. A `vbox` lays out children from north to south and owns
-west and east channels. Nodes are the only visible, connectable elements.
-Containers are structural: their rectangles and routing machinery are rendered
-only when debug output is enabled.
+west and east channels. Nodes are the only connectable elements. Containers
+remain structural, but an explicit title makes a container boundary and label
+visible outside debug output; untitled container rectangles and all routing
+machinery are rendered only when debug output is enabled.
 
 Attribute syntax is deliberately generic, but the validated model is not.
 `syntax.go` converts parsed key/value pairs into explicit subject-specific
-fields such as `NodeAttributes.Spring`. Unknown names and incompatible value
-types are rejected at that boundary; routing and layout never interpret raw
-attribute strings or generic maps.
+fields such as `NodeAttributes.Spring` and
+`ContainerAttributes.LabelAlign`. Unknown names and incompatible value types
+are rejected at that boundary; routing and layout never interpret raw attribute
+strings or generic maps.
 
 There are two kinds of routes:
 
@@ -137,6 +139,12 @@ Containers reserve three distinct kinds of space:
 - seams between consecutive children;
 - outer channel bands on the two sides allowed by the container kind.
 
+A titled container additionally reserves a fixed-height label strip at its top.
+For an `hbox`, the north channel band lies immediately below that strip; for a
+`vbox`, the west and east bands flank it. The title width is deliberately absent
+from bottom-up measurement; final-width truncation and horizontal placement
+belong to the display pass.
+
 Each outer channel is represented by one center line during routing. Individual
 edge lanes are offsets from that line and are applied only when producing the
 display path.
@@ -213,6 +221,14 @@ exact node port with an orthogonal projection. Duplicate points and redundant
 collinear points are then removed. Arrowheads and styling are SVG concerns and
 do not participate in layout or routing.
 
+Container labels are also a display concern after their fixed strip has been
+reserved. Once lane-offset display routes are known, an automatically aligned
+label runs a one-dimensional sweep over route-intersection events in its strip.
+It chooses the position covering the fewest route segments and uses the leftmost
+position as a deterministic tie-breaker. Explicit `left`, `center`, and `right`
+alignments bypass the sweep. Visible text is heuristically truncated to the
+final strip width; the full title remains in the SVG `<title>` element.
+
 ## Debug rendering
 
 Debug rendering is an SVG-only view of the same solved geometry; it never
@@ -230,7 +246,10 @@ sibling crossbars use distinct classes and colors. Named resources also carry
   used for topology and recursive frontiers.
 - Edge springs align a compact routing rectangle; they do not extend its owned
   channels through empty alignment space.
-- Structural containers are routing topology, not connectable obstacles.
+- Structural containers are routing topology, not connectable obstacles or
+  endpoints, even when a title makes their boundary visible.
+- Container label height affects layout, but label width and horizontal
+  placement never affect measurement or routing.
 - Seam classification depends only on the element tree and explicit side
   constraints.
 - Outer routes use only the finite structural routing graph; they do not gain

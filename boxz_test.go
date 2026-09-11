@@ -99,6 +99,30 @@ hbox root {
 	}
 }
 
+func TestParseContainerTitlesAndLabelAlignment(t *testing.T) {
+	doc, err := ParseString("groups.boxz", `
+vbox root "System" [labelAlign = center] {
+  hbox services "Services" [labelAlign = RIGHT] {
+    node api
+  }
+  hbox automatic "Automatic" [labelAlign = auto] { node worker }
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Root.Title != "System" || doc.Root.ContainerAttributes.LabelAlign != LabelAlignCenter {
+		t.Fatalf("root title/attributes = %q/%q, want System/center", doc.Root.Title, doc.Root.ContainerAttributes.LabelAlign)
+	}
+	services := doc.Root.Children[0]
+	if services.Title != "Services" || services.ContainerAttributes.LabelAlign != LabelAlignRight {
+		t.Fatalf("services title/attributes = %q/%q, want Services/right", services.Title, services.ContainerAttributes.LabelAlign)
+	}
+	if got := doc.Root.Children[1].ContainerAttributes.LabelAlign; got != LabelAlignAuto {
+		t.Fatalf("explicit automatic alignment = %q, want auto", got)
+	}
+}
+
 func TestAttributeGrammarAcceptsScalarValuesAndTrailingComma(t *testing.T) {
 	parsed, err := documentParser.ParseString("attributes.boxz", `node root [text = "foo", integer = 17, decimal = -2.5, enabled = true,]`)
 	if err != nil {
@@ -116,12 +140,16 @@ func TestParseRejectsInvalidAttributesAndEmptySpringContainer(t *testing.T) {
 		source string
 		want   string
 	}{
-		"duplicate":        {`hbox root { node a [spring, spring] }`, "duplicate attribute"},
-		"unknown":          {`hbox root { node a [sprung] }`, "attribute \"sprung\" is not supported"},
-		"invalid spring":   {`hbox root { node a [spring = 1] }`, "must be a flag or boolean"},
-		"container attr":   {`hbox root [spring] { node a }`, "is not supported on hbox"},
-		"only springs":     {`hbox root { spring spring }`, "must contain at least one child"},
-		"spring root node": {`node root [spring]`, "root node \"root\" cannot be spring-enabled"},
+		"duplicate":          {`hbox root { node a [spring, spring] }`, "duplicate attribute"},
+		"unknown":            {`hbox root { node a [sprung] }`, "attribute \"sprung\" is not supported"},
+		"invalid spring":     {`hbox root { node a [spring = 1] }`, "must be a flag or boolean"},
+		"container attr":     {`hbox root [spring] { node a }`, "is not supported on hbox"},
+		"invalid alignment":  {`hbox root "Root" [labelAlign = north] { node a }`, "must be auto, left, center, or right"},
+		"bare alignment":     {`hbox root "Root" [labelAlign] { node a }`, "must be auto, left, center, or right"},
+		"align no title":     {`hbox root [labelAlign = left] { node a }`, "has labelAlign but no title"},
+		"old attribute name": {`hbox root "Root" [labelAnchor = left] { node a }`, "attribute \"labelAnchor\" is not supported"},
+		"only springs":       {`hbox root { spring spring }`, "must contain at least one child"},
+		"spring root node":   {`node root [spring]`, "root node \"root\" cannot be spring-enabled"},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -130,6 +158,71 @@ func TestParseRejectsInvalidAttributesAndEmptySpringContainer(t *testing.T) {
 				t.Fatalf("error = %v, want diagnostic containing %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestContainerLabelReservesOnlyHeight(t *testing.T) {
+	untitled, err := ParseString("untitled.boxz", `hbox root { node a }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titled, err := ParseString("titled.boxz", `hbox root "A title far wider than its child" { node a }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planUntitled, err := buildRoutingPlan(untitled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planTitled, err := buildRoutingPlan(titled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	plain, err := buildLayout(untitled, cfg, nil, planUntitled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withLabel, err := buildLayout(titled, cfg, nil, planTitled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withLabel.Root.Rect.W != plain.Root.Rect.W {
+		t.Fatalf("titled width = %g, want unchanged width %g", withLabel.Root.Rect.W, plain.Root.Rect.W)
+	}
+	wantGrowth := cfg.LineHeight + 2*cfg.GroupLabelPaddingY
+	if got := withLabel.Root.Rect.H - plain.Root.Rect.H; got != wantGrowth {
+		t.Fatalf("titled height growth = %g, want label strip %g", got, wantGrowth)
+	}
+	north := withLabel.Root.Channels[North]
+	if north == nil || withLabel.Root.LabelStrip.Y+withLabel.Root.LabelStrip.H > north.A.Y {
+		t.Fatalf("label strip = %#v, want it above north channel at %v", withLabel.Root.LabelStrip, north)
+	}
+}
+
+func TestAutomaticGroupLabelPlacementAvoidsRoutes(t *testing.T) {
+	cfg := DefaultConfig()
+	root := &placement{
+		Element:    &Element{Kind: KindHBox, ID: "root", Title: "AAAA"},
+		LabelStrip: rect{X: 0, Y: 10, W: 100, H: cfg.LineHeight + 2*cfg.GroupLabelPaddingY},
+	}
+	routes := [][]point{{{X: 20, Y: 0}, {X: 20, Y: 100}}}
+	labels := placeGroupLabels(root, routes, cfg)
+	if len(labels) != 1 {
+		t.Fatalf("labels = %#v, want one", labels)
+	}
+	if labels[0].rect.X <= 20 {
+		t.Fatalf("automatic label x = %g, want it moved right of crossing at 20", labels[0].rect.X)
+	}
+	if score := labelCrossingScore(labels[0].rect, routes, 1); score != 0 {
+		t.Fatalf("automatic label crossing score = %d, want zero", score)
+	}
+
+	root.Element.ContainerAttributes.LabelAlign = LabelAlignCenter
+	labels = placeGroupLabels(root, routes, cfg)
+	wantCenter := (root.LabelStrip.W - labels[0].rect.W) / 2
+	if labels[0].rect.X != wantCenter {
+		t.Fatalf("centered label x = %g, want %g", labels[0].rect.X, wantCenter)
 	}
 }
 
@@ -557,6 +650,60 @@ func TestRenderSVGIsDeterministicAndOrthogonal(t *testing.T) {
 		}
 	}
 	assertOrthogonalPaths(t, first.String())
+}
+
+func TestRenderTitledContainerBoundaryAndTruncatedLabel(t *testing.T) {
+	doc, err := ParseString("group.boxz", `vbox root "This title is much too long" [labelAlign = right] { node a "A" node b "B" }
+edges { a -> b }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	svg := output.String()
+	for _, marker := range []string{
+		`class="boxz-group-boundary" data-container="root"`,
+		`class="boxz-group-label" data-container="root"`,
+		`<title>This title is much too long</title>`,
+		`<text class="boxz-group-title"`,
+		`…</text>`,
+	} {
+		if !strings.Contains(svg, marker) {
+			t.Fatalf("rendered SVG does not contain %q", marker)
+		}
+	}
+	if strings.Index(svg, `<g class="boxz-edges">`) > strings.Index(svg, `<g class="boxz-group-labels">`) {
+		t.Fatal("group label was not painted after edges")
+	}
+}
+
+func TestContainerLabelAlignmentDoesNotChangeRoutes(t *testing.T) {
+	render := func(alignment string) string {
+		t.Helper()
+		source := `hbox root "Group" [labelAlign = ` + alignment + `] { node a node b node c }
+edges { a:N -> c:N b -> c }`
+		doc, err := ParseString("alignment.boxz", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+			t.Fatal(err)
+		}
+		return output.String()
+	}
+	leftPaths := pathPattern.FindAllStringSubmatch(render("left"), -1)
+	rightPaths := pathPattern.FindAllStringSubmatch(render("right"), -1)
+	if len(leftPaths) != len(rightPaths) {
+		t.Fatalf("left paths = %d, right paths = %d", len(leftPaths), len(rightPaths))
+	}
+	for index := range leftPaths {
+		if leftPaths[index][1] != rightPaths[index][1] {
+			t.Fatalf("label alignment changed route %d from %q to %q", index, leftPaths[index][1], rightPaths[index][1])
+		}
+	}
 }
 
 func TestRenderNestedSameKindContainers(t *testing.T) {

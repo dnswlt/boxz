@@ -14,13 +14,13 @@ language. It is for architecture sketches made from nested boxes and arrows,
 not for accumulating every possible diagram shape and notation.
 
 ```boxz
-vbox system {
-  hbox services {
+vbox system "Order System" {
+  hbox services "Services" {
     node client "Client"
     node api "API Server"
   }
 
-  hbox storage {
+  hbox storage "Storage" [labelAlign = right] {
     node database "Database"
     node cache "Cache"
   }
@@ -41,7 +41,7 @@ Render a source file with the Go command:
 go run ./cmd/boxz -o diagram.svg examples/basic.boxz
 ```
 
-Use `-debug` to include the otherwise invisible container boundaries, channels,
+Use `-debug` to include all structural container boundaries, channels,
 hierarchy risers, sibling crossbars, and allocated ports:
 
 ```sh
@@ -56,6 +56,8 @@ Debug output changes only the visualization, not layout or routing.
   the complete grammar.
 - [Springs](docs/springs.md): relational spacing, alignment, and expandable
   nodes.
+- [Container labels](docs/container-labels.md): visible group boundaries,
+  label strips, alignment, and automatic placement.
 - [Architecture](docs/architecture.md): layout and routing internals, phase
   boundaries, and invariants.
 - [Visual routing gallery](examples/gallery/README.md): focused examples for
@@ -69,7 +71,7 @@ Render the complete gallery with:
 
 ## Current scope
 
-Boxz currently has directed edges, conservative single-line title measurement,
-automatic ports, orthogonal routing, and relational spacing. Self-edges, edge
-labels, container labels, styling syntax, and attributes on edges or containers
-are not implemented yet.
+Boxz currently has directed edges, conservative single-line node-title
+measurement, titled container boundaries, automatic orthogonal routing, and
+relational spacing. Self-edges, edge labels, multiline titles, styling syntax,
+and connectable containers are not implemented yet.
