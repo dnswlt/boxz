@@ -26,6 +26,12 @@ type Config struct {
 	ChannelPadding     float64
 	LaneSpacing        float64
 	CanvasMargin       float64
+	// EdgeRouter selects the routing implementation. The zero value is the
+	// built-in structural router.
+	EdgeRouter RouterKind
+	// AvoidBinary overrides discovery of the boxz-avoid executable. Only
+	// consulted when EdgeRouter is RouterAvoid.
+	AvoidBinary string
 }
 
 // DefaultConfig returns conservative dimensions suitable for the bundled SVG style.

@@ -19,4 +19,5 @@ Start with [README.md](README.md), then use:
   libavoid edge router, an optional C++ sidecar process.
 
 Run `go test ./...` and `./scripts/render-gallery.sh` after layout or routing
-changes.
+changes. `./scripts/compare-routers.sh` renders the gallery under both edge
+routers side by side when the optional `boxz-avoid` binary is built.

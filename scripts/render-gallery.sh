@@ -4,6 +4,8 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 output_dir=${1:-"$repo_dir/.gallery"}
+# BOXZ_ROUTER selects the edge router; "avoid" needs avoidrouter/build/boxz-avoid.
+router=${BOXZ_ROUTER:-builtin}
 
 mkdir -p "$output_dir"
 output_dir=$(CDPATH= cd -- "$output_dir" && pwd)
@@ -27,14 +29,14 @@ index="$output_dir/index.html"
   printf '%s\n' 'p { margin: -4px 0 12px; color: #475569; }'
   printf '%s\n' 'img { display: block; max-width: none; }'
   printf '%s\n' '</style>'
-  printf '%s\n' '<h1>boxz visual routing gallery</h1>'
+  printf '%s\n' "<h1>boxz visual routing gallery ($router router)</h1>"
   printf '%s\n' '<main>'
 } > "$index"
 
 for input in "$repo_dir"/examples/gallery/*.boxz; do
   name=$(basename "$input" .boxz)
   criterion=$(sed -n '1s|^// *||p' "$input")
-  "$renderer" -debug -o "$output_dir/$name.svg" "$input"
+  "$renderer" -debug -router "$router" -o "$output_dir/$name.svg" "$input"
   {
     printf '  <figure>\n'
     printf '    <figcaption>%s</figcaption>\n' "$name"

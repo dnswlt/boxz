@@ -16,8 +16,9 @@ func main() {
 func run() int {
 	outputPath := flag.String("o", "-", "output SVG file (default: stdout)")
 	debug := flag.Bool("debug", false, "draw containers and routing diagnostics")
+	router := flag.String("router", "builtin", "edge router: builtin or avoid (experimental)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: boxz [-debug] [-o output.svg] input.boxz\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: boxz [-debug] [-router builtin|avoid] [-o output.svg] input.boxz\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -53,6 +54,15 @@ func run() int {
 	}
 	cfg := boxz.DefaultConfig()
 	cfg.Debug = *debug
+	switch *router {
+	case "builtin":
+		cfg.EdgeRouter = boxz.RouterBuiltin
+	case "avoid":
+		cfg.EdgeRouter = boxz.RouterAvoid
+	default:
+		fmt.Fprintf(os.Stderr, "boxz: unknown router %q; want builtin or avoid\n", *router)
+		return 2
+	}
 	if err := boxz.RenderSVG(output, doc, cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "boxz: %v\n", err)
 		return 1

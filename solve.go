@@ -13,6 +13,9 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point,
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if cfg.EdgeRouter == RouterAvoid {
+		return solveWithAvoid(doc, cfg, plan)
+	}
 	// Channel, connector, and cyclic-seam demand is only known after routing,
 	// while routing needs coordinates. Allocations only grow, so the loop cannot
 	// oscillate between smaller and larger layouts.
