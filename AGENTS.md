@@ -14,7 +14,9 @@ Start with [README.md](README.md), then use:
 - [docs/springs.md](docs/springs.md) for relational sizing;
 - [docs/container-labels.md](docs/container-labels.md) for visible groups;
 - [docs/architecture.md](docs/architecture.md) for implementation concepts;
-- [examples/gallery/README.md](examples/gallery/README.md) for visual checks.
+- [examples/gallery/README.md](examples/gallery/README.md) for visual checks;
+- [avoidrouter/README.md](avoidrouter/README.md) for the experimental
+  libavoid edge router, an optional C++ sidecar process.
 
 Run `go test ./...` and `./scripts/render-gallery.sh` after layout or routing
 changes.
