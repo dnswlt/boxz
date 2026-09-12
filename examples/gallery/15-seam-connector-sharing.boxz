@@ -1,0 +1,30 @@
+// Direct seam exposure and an outer route receive separate tracks when they
+// cross the same nested hierarchy connector.
+hbox root {
+  vbox c1 {
+    vbox c2 {
+      spring
+      hbox c3 {
+        node n4 "xxxxxxxxxxxxxx"
+        node n5 "xxxxxxxxxxxxx"
+        node n6 "xxxxxxxxxxxxx"
+        node n7 "xxxxxxx"
+      }
+    }
+    node n8 "xxxxxxxxx"
+  }
+  node n9 "xx"
+}
+
+edges {
+  n7 -> n5
+  n4 -> n5
+  n7 -> n8
+  n7 -> n5
+  n8 -> n9
+  n7 -> n5
+  n4 -> n7
+  n7 -> n9
+  n8 -> n5
+  n9 -> n4
+}

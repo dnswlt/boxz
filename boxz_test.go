@@ -2,6 +2,7 @@ package boxz
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -441,11 +442,37 @@ func TestGalleryAvoidsNodeInteriors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			assertSolvedRouteMetadata(t, routes)
 			assertNoNodeRectOverlaps(t, l)
 			assertRoutesAvoidOtherNodes(t, l, routes, ports, DefaultConfig())
 			assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
 			assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
 		})
+	}
+}
+
+func assertSolvedRouteMetadata(t *testing.T, routes *routeResult) {
+	t.Helper()
+	for _, route := range routes.Edges {
+		segments := len(route.Points) - 1
+		if len(route.Resources) != segments || len(route.Domains) != segments {
+			t.Fatalf("route %s -> %s has %d segments, %d resources, and %d domains",
+				route.From, route.To, segments, len(route.Resources), len(route.Domains))
+		}
+		if len(route.Display) < 2 {
+			t.Fatalf("route %s -> %s has no materialized display path", route.From, route.To)
+		}
+		for index, domainID := range route.Domains {
+			domain, connector := routes.Domains[domainID]
+			if !connector {
+				continue
+			}
+			a, b := route.Points[index], route.Points[index+1]
+			if domain.Horizontal != (a.Y == b.Y) {
+				t.Fatalf("route %s -> %s uses connector %q in the wrong orientation: %v -> %v",
+					route.From, route.To, domainID, a, b)
+			}
+		}
 	}
 }
 
@@ -541,6 +568,141 @@ edges { b -> a b -> x b -> y }
 			assertNoCollinearEdgeOverlaps(t, output.String())
 		})
 	}
+}
+
+func TestHierarchyConnectorAllocatesTracks(t *testing.T) {
+	doc, err := ParseString("hierarchy-risers.boxz", `
+hbox root {
+  node n1 "xxxxx"
+  node n2 "xxxxx"
+  node n3 "xxxxx"
+  hbox c4 { node n5 "xxxxxxxx" node n6 "xxxxxxxxxx" }
+}
+edges { n5 -> n3 n2 -> n1 n5 -> n2 n3 -> n6 n3 -> n6 }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, routes, ports, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sharedConnector string
+	for domain, spec := range routes.Domains {
+		if spec.Kind == connectorHierarchy && len(routes.ConnectorUses[domain]) > 1 {
+			sharedConnector = domain
+			break
+		}
+	}
+	if sharedConnector == "" {
+		t.Fatalf("connector uses = %#v, want a shared hierarchy domain", routes.ConnectorUses)
+	}
+	coordinates := make(map[float64]bool)
+	for _, edgeIndex := range routes.ConnectorUses[sharedConnector] {
+		route := routes.Edges[edgeIndex]
+		for segmentIndex, domain := range route.Domains {
+			if domain != sharedConnector {
+				continue
+			}
+			a, b := route.Points[segmentIndex], route.Points[segmentIndex+1]
+			if a.Y == b.Y {
+				coordinates[a.Y] = true
+			} else {
+				coordinates[a.X] = true
+			}
+			break
+		}
+	}
+	if len(coordinates) != len(routes.ConnectorUses[sharedConnector]) {
+		t.Fatalf("shared connector %q coordinates = %v, want %d distinct tracks", sharedConnector, coordinates, len(routes.ConnectorUses[sharedConnector]))
+	}
+	assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
+	assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+}
+
+func TestHierarchyConnectorCapacityCanGrowNestedContainer(t *testing.T) {
+	doc, err := ParseString("riser-demand.boxz", `hbox root { hbox child { node a } node b }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	const tracks = 30
+	l, err := buildLayout(doc, cfg, map[string]int{riserID("child", North, 0): tracks}, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := float64(tracks-1)*cfg.LaneSpacing + math.Max(cfg.AlongPadding, 2*cfg.ChannelPadding)
+	if l.ByID["child"].Rect.W < want {
+		t.Fatalf("child width = %g, want at least %g for %d connector tracks", l.ByID["child"].Rect.W, want, tracks)
+	}
+}
+
+func TestDirectSeamAndOuterRouteShareConnectorAllocation(t *testing.T) {
+	doc, err := ParseString("seam-connector.boxz", `
+hbox root {
+  vbox c1 {
+    vbox c2 {
+      spring
+      hbox c3 {
+        node n4 "xxxxxxxxxxxxxx"
+        node n5 "xxxxxxxxxxxxx"
+        node n6 "xxxxxxxxxxxxx"
+        node n7 "xxxxxxx"
+      }
+    }
+    node n8 "xxxxxxxxx"
+  }
+  node n9 "xx"
+}
+edges {
+  n7 -> n5
+  n4 -> n5
+  n7 -> n8
+  n7 -> n5
+  n8 -> n9
+  n7 -> n5
+  n4 -> n7
+  n7 -> n9
+  n8 -> n5
+  n9 -> n4
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, routes, ports, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := riserID("c2", East, 0)
+	if got := routes.ConnectorUses[domain]; len(got) != 2 {
+		t.Fatalf("domain %q uses = %v, want seam and outer route", domain, got)
+	}
+	coordinates := make(map[float64]bool)
+	for _, edgeIndex := range routes.ConnectorUses[domain] {
+		route := routes.Edges[edgeIndex]
+		for segmentIndex, candidate := range route.Domains {
+			if candidate == domain {
+				a, b := route.Points[segmentIndex], route.Points[segmentIndex+1]
+				if a.Y == b.Y {
+					coordinates[a.Y] = true
+				} else {
+					coordinates[a.X] = true
+				}
+				break
+			}
+		}
+	}
+	if len(coordinates) != 2 {
+		t.Fatalf("domain %q coordinates = %v, want two allocated tracks", domain, coordinates)
+	}
+	assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
+	assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
 }
 
 func TestRecursiveFrontiers(t *testing.T) {
@@ -1021,7 +1183,7 @@ edges {
 				t.Fatal(err)
 			}
 			usesCrossbar := false
-			for resource, edgeIndexes := range routes.ChannelUses {
+			for resource, edgeIndexes := range routes.ResourceUses {
 				usedByRoute := false
 				for _, edgeIndex := range edgeIndexes {
 					usedByRoute = usedByRoute || edgeIndex == routes.Edges[0].EdgeIndex
@@ -1038,7 +1200,7 @@ edges {
 				}
 			}
 			if !usesCrossbar {
-				t.Fatalf("route resources = %#v, want a sibling crossbar", routes.ChannelUses)
+				t.Fatalf("route resources = %#v, want a sibling crossbar", routes.ResourceUses)
 			}
 
 			debugConfig := DefaultConfig()

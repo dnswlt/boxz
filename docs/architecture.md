@@ -7,28 +7,31 @@ stable across edits.
 The rendering pipeline is:
 
 ```text
-source -> syntax tree -> routing plan -> measure/place <-> route -> SVG
+source -> syntax tree -> topology plan
+       -> [measure/place -> route intents -> track allocation]*
+       -> exact polylines -> SVG
 ```
 
 The routing plan contains decisions that depend only on source topology. The
-double arrow is a bounded fixed-point calculation over geometry: routing
-discovers how many lanes each outer channel needs, and physical port alignment
-may reveal that a cyclic seam needs additional tracks. Layout grows that space
-before trying again. Allocated track counts only grow, so the calculation cannot
-oscillate between smaller and larger allocations.
+repeated section is a bounded fixed-point calculation over geometry: routing
+discovers how many lanes each channel and hierarchy connector needs, while
+physical port alignment may reveal that a cyclic seam needs additional tracks.
+Layout grows only that local space before trying again. Allocated capacities
+only grow, so the calculation cannot oscillate between smaller and larger
+allocations.
 
 More precisely, one iteration:
 
 1. measures and places the tree using the currently allocated routing space;
-2. builds the center-line routing graph and routes every edge;
-3. chooses exact node ports and solves seam-local track ordering;
-4. repeats if any outer channel or seam needs more tracks.
+2. builds the center-line routing graph and chooses route intents;
+3. chooses exact node ports and rebuilds prescribed seam routes from them;
+4. allocates channel lanes, seam tracks, and movable connector tracks;
+5. repeats if any local routing domain needs more capacity.
 
-Once allocations are stable, seam paths are rebuilt from the final allocated
-ports and movable sibling crossbars receive their physical coordinates. The
-solver returns that same port map with the layout and routes, so SVG rendering
-cannot accidentally allocate a different set. It then converts the abstract
-routes into display paths.
+Once allocations are stable, the solver materializes exact orthogonal
+polylines. It returns those paths together with the same port map used to build
+them. SVG rendering only paints solved geometry; it does not allocate ports,
+move tracks, or repair endpoints.
 
 The implementation follows those phase boundaries:
 
@@ -37,8 +40,9 @@ The implementation follows those phase boundaries:
 - `topology.go` classifies direct seams and records conservative port demand;
 - `layout.go` measures and places elements and their owned channels;
 - `route.go` constructs the structural graph and finds outer routes;
-- `seam.go` assigns physical seam and crossbar tracks;
-- `svg.go` runs the fixed point and turns solved routes into SVG paths.
+- `seam.go` assigns physical seam and movable-connector tracks;
+- `solve.go` owns the fixed point, port allocation, and path materialization;
+- `svg.go` places labels and renders the solved layout.
 
 ## Model
 
@@ -56,7 +60,7 @@ fields such as `NodeAttributes.Spring` and
 are rejected at that boundary; routing and layout never interpret raw attribute
 strings or generic maps.
 
-There are two kinds of routes:
+There are two ways to choose a route intent:
 
 - A **seam route** crosses the gap between adjacent children of one container.
   Its endpoint sides follow the container axis: S/N in a `vbox`, E/W in an
@@ -64,9 +68,34 @@ There are two kinds of routes:
 - An **outer-channel route** uses channels on container boundaries and risers
   connecting nested containers to their parents.
 
+The distinction ends after path selection. Both kinds declare their physical
+occupancy and participate in the same local track allocation. A prescribed
+seam route must not become invisible to outer-route allocation merely because
+it did not pass through graph search.
+
 Seam eligibility is topological, not geometric. This avoids making a routing
 decision from coordinates that may change when routing itself requires more
 space.
+
+### Graph resources and track domains
+
+The router separates two identities that often, but not always, have the same
+name:
+
+- A **graph resource** is an edge available to pathfinding and a key for the
+  congestion tie-breaker.
+- A **track domain** is shared physical space whose collinear users must receive
+  distinct coordinates.
+
+Ordinary channel segments use the channel ID for both. Several sibling
+crossbar graph edges instead share one seam connector domain. A prescribed seam
+path can claim a hierarchy or sibling connector domain without having a graph
+resource at all.
+
+This separation is important for correctness: path selection decides where an
+edge may travel; domain allocation decides how multiple selected paths coexist
+there. Perpendicular crossings are allowed and therefore do not contend for a
+track.
 
 ### Endpoint sides and ports
 
@@ -175,6 +204,24 @@ margin. See [Springs](springs.md) for the user-facing semantics and examples.
 graph. Every intersection splits both participating segments. Node-side portals
 become graph vertices, so a graph path always starts and ends on legal sides.
 
+Container-to-parent transitions have two forms. A transition that continues an
+orthogonal child channel collinearly remains in that channel's track domain, so
+the whole straight run receives one lane offset. A transition between parallel
+child and parent channels is a movable **hierarchy connector**. Its graph edge
+is placed at a representative center coordinate, but physical uses may be
+assigned anywhere in the overlap of the two channels.
+
+Hierarchy-connector demand participates in the fixed point. North/south
+connectors can grow their child container horizontally, and east/west
+connectors can grow it vertically. This keeps an arbitrary number of tracks
+inside the nested container instead of relying on its incidental minimum size.
+Connector allocation changes only the local coordinate and adds short shoulders
+at its ends; it never changes route topology.
+
+Node access legs remain unnamed terminal geometry because exact endpoint ports
+already separate them and unrelated routes may not use nodes as transit
+junctions.
+
 This is a structural routing graph, not a geometric visibility graph. Routes
 can travel only over channels, hierarchy risers, and generated crossbars; the
 router does not search arbitrary empty coordinates around rectangles.
@@ -188,23 +235,23 @@ unrelated route cannot use a node as a transit junction.
 
 Crossbars do not weaken recursive-frontier rules. Frontier-to-frontier edges
 still receive direct seam routes first; an outer route can cross a sibling gap
-only after it has reached a boundary channel. Crossbars are named routing
-resources and contribute to the congestion tie-breaker.
+only after it has reached a boundary channel. Crossbars have graph-resource
+identities and contribute to the congestion tie-breaker, but all crossbars
+through one sibling gap share a physical connector domain.
 
-After ports and direct seam tracks are final, movable crossbars are allocated in
-the same sibling-gap domain. The direct routes' endpoint coordinates are
-reserved first. A crossbar prefers the resolved coordinate of its straight run:
-the exact node port when endpoint-adjacent, otherwise the assigned channel lane.
-It then chooses a distinct nearby coordinate within the overlap of its facing
-channels. Short shoulders connect a shifted crossbar back to those channels.
-This prevents both false conflicts with already-separated ports and real
-overlaps with a direct route's access leg without changing route topology.
+Hierarchy bridges and sibling crossbars use the same connector allocator.
+Every use supplies a preferred coordinate and legal interval. Prescribed seam
+uses are allocated first, so a clean direct line normally remains straight;
+searched routes choose the nearest free coordinate. Equal-priority choices use
+edge declaration order. Shifted uses receive short shoulders at the connector
+ends. This prevents both false conflicts with already-separated ports and real
+overlaps between route families without changing either route's topology.
 
 Outer routes use Dijkstra's algorithm with a lexicographic cost:
 
 1. Manhattan distance;
 2. bend count;
-3. previous use of the traversed channels.
+3. previous use of the traversed routing resources.
 
 The incoming direction is part of the search state because bend cost cannot be
 derived from position alone. Within one search, fixed endpoint-side order,
@@ -216,20 +263,23 @@ Distance and bend costs are evaluated on center-line geometry. Lane offsets and
 exact endpoint-port projections are display refinements and do not feed back
 into shortest-path selection.
 
-## Display paths
+## Physical track allocation and display paths
 
-The routing graph uses channel center lines. After all routes are known,
-`svg.go` assigns stable node ports and a lane number to every channel use.
-Collinear graph segments are merged into straight runs before lane offsets are
-applied. This is important: offsetting a channel segment separately from an
-adjacent collinear riser would create a small, meaningless jog.
+The routing graph and prescribed seam recursion initially produce center-line
+route intents. A route retains graph-resource and track-domain boundaries even
+when adjacent segments are collinear; simplifying those boundaries too early
+would hide shared-space occupancy from the allocator.
 
-At each outer-route endpoint, the final path reconnects the first or last
+Channel domains assign stable parallel lane offsets. Movable connector domains
+assign absolute coordinates within their legal interval. A connector use that
+moves from its preferred coordinate receives local orthogonal shoulders. Only
+after those decisions are complete are adjacent geometric runs simplified.
+
+At each outer-route endpoint, materialization reconnects the first or last
 offset run to its exact node port with an orthogonal projection. Final seam
 paths already start and end at their allocated ports, making this projection a
-no-op for them. Duplicate points and redundant collinear points are then
-removed. Arrowheads and styling are SVG concerns and do not participate in
-layout or routing.
+no-op for them. Arrowheads and styling are SVG concerns and do not participate
+in layout or routing.
 
 Container labels are also a display concern after their fixed strip has been
 reserved. Once lane-offset display routes are known, an automatically aligned
@@ -244,9 +294,10 @@ final strip width; the full title remains in the SVG `<title>` element.
 Debug rendering is an SVG-only view of the same solved geometry; it never
 changes measurement or routing. It draws structural container rectangles, all
 center-line graph segments, and exact allocated endpoint ports behind or above
-the normal diagram as appropriate. Channels, unnamed hierarchy risers, and
-sibling crossbars use distinct classes and colors. Named resources also carry
-`data-resource` attributes for inspection.
+the normal diagram as appropriate. Channels, hierarchy risers, and sibling
+crossbars use distinct classes and colors. Named resources also carry
+`data-resource` attributes; graph segments whose physical domain differs also
+carry `data-domain`.
 
 ## Invariants worth preserving
 
@@ -264,6 +315,12 @@ sibling crossbars use distinct classes and colors. Named resources also carry
   constraints.
 - Outer routes use only the finite structural routing graph; they do not gain
   geometric shortcuts from accidental alignment.
+- A graph resource controls pathfinding and congestion; a track domain controls
+  physical coexistence. Code must not assume those identities always match.
+- Every collinear traversal through shared routing space declares a domain use
+  before exact paths are materialized.
+- Hierarchy bridges and sibling crossbars are movable connector domains; node
+  access legs remain port-projected endpoint geometry.
 - Seam track ordering depends only on final port alignment within that seam.
 - Final seam paths begin and end at the same allocated ports returned to the
   renderer.
@@ -273,9 +330,10 @@ sibling crossbars use distinct classes and colors. Named resources also carry
   rendering tolerance.
 - Sibling crossbars connect routing networks, never arbitrary visible points or
   node interiors.
-- Direct seam access coordinates and movable crossbar tracks cannot coincide.
+- Direct seam access and searched routes cannot receive the same connector
+  track.
 - All route segments are horizontal or vertical.
-- Channel allocation grows monotonically until stable.
+- Channel, connector, and seam capacity grows monotonically until stable.
 - Iteration over maps must not affect rendered output.
 - Equal-cost paths use fixed side order, sorted adjacency, and search insertion
   order as deterministic tie-breakers.

@@ -9,6 +9,7 @@ Core principles:
 
 Start with [README.md](README.md), then use:
 
+- [docs/concepts.md](docs/concepts.md) for the design model and related work;
 - [docs/language.md](docs/language.md) for source syntax;
 - [docs/springs.md](docs/springs.md) for relational sizing;
 - [docs/container-labels.md](docs/container-labels.md) for visible groups;

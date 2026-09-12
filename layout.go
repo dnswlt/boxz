@@ -3,6 +3,7 @@ package boxz
 import (
 	"fmt"
 	"math"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -104,14 +105,14 @@ type measured struct {
 
 // buildLayout separates bottom-up measurement from top-down placement so child
 // order and alignment never depend on traversal side effects.
-func buildLayout(doc *Document, cfg Config, laneCounts map[string]int, plan *routingPlan) (*layout, error) {
+func buildLayout(doc *Document, cfg Config, capacity map[string]int, plan *routingPlan) (*layout, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 	if err := validateSpringSlots(doc.Root); err != nil {
 		return nil, err
 	}
-	m := measureElement(doc.Root, cfg, laneCounts, plan)
+	m := measureElement(doc.Root, cfg, capacity, plan)
 	result := &layout{ByID: make(map[string]*placement), Channels: make(map[string]*channel)}
 	rootSlot := rect{X: cfg.CanvasMargin, Y: cfg.CanvasMargin, W: m.w, H: m.h}
 	result.Root = placeElement(m, rootSlot, cfg, result)
@@ -175,7 +176,7 @@ func validateConfig(cfg Config) error {
 
 // measureElement reserves node ports, sibling seams, and outer channel bands in
 // a bottom-up pass.
-func measureElement(element *Element, cfg Config, lanes map[string]int, plan *routingPlan) *measured {
+func measureElement(element *Element, cfg Config, capacity map[string]int, plan *routingPlan) *measured {
 	m := &measured{element: element}
 	if element.Kind == KindNode {
 		m.w = math.Max(cfg.MinNodeWidth, float64(utf8.RuneCountInString(element.Title))*cfg.CharacterWidth+2*cfg.NodePaddingX)
@@ -209,7 +210,7 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 	}
 
 	for _, child := range element.Children {
-		m.children = append(m.children, measureElement(child, cfg, lanes, plan))
+		m.children = append(m.children, measureElement(child, cfg, capacity, plan))
 	}
 	if element.Title != "" {
 		m.label = cfg.LineHeight + 2*cfg.GroupLabelPaddingY
@@ -218,8 +219,8 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		m.gaps = append(m.gaps, seamBand(cfg, plan.SeamTrackCount[seamID(element.ID, index)]))
 	}
 	if element.Kind == KindHBox {
-		m.top = channelBand(cfg, lanes[channelID(element.ID, North)])
-		m.bottom = channelBand(cfg, lanes[channelID(element.ID, South)])
+		m.top = channelBand(cfg, capacity[channelID(element.ID, North)])
+		m.bottom = channelBand(cfg, capacity[channelID(element.ID, South)])
 		maxHeight := 0.0
 		for index, child := range m.children {
 			m.w += child.w
@@ -234,8 +235,8 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		m.w += 2 * cfg.AlongPadding
 		m.h = m.top + m.label + maxHeight + m.bottom
 	} else {
-		m.left = channelBand(cfg, lanes[channelID(element.ID, West)])
-		m.right = channelBand(cfg, lanes[channelID(element.ID, East)])
+		m.left = channelBand(cfg, capacity[channelID(element.ID, West)])
+		m.right = channelBand(cfg, capacity[channelID(element.ID, East)])
 		maxWidth := 0.0
 		for index, child := range m.children {
 			m.h += child.h
@@ -250,7 +251,29 @@ func measureElement(element *Element, cfg Config, lanes map[string]int, plan *ro
 		m.h += 2*cfg.AlongPadding + m.label
 		m.w = m.left + maxWidth + m.right
 	}
+	// A hierarchy connector allocates tracks across the child container. Reserve
+	// enough cross-axis extent that those tracks fit even in a narrow subtree.
+	horizontalConnectors := maxInt(hierarchyConnectorCapacity(capacity, element.ID, North), hierarchyConnectorCapacity(capacity, element.ID, South))
+	verticalConnectors := maxInt(hierarchyConnectorCapacity(capacity, element.ID, West), hierarchyConnectorCapacity(capacity, element.ID, East))
+	margin := math.Max(cfg.AlongPadding, 2*cfg.ChannelPadding)
+	if horizontalConnectors > 0 {
+		m.w = math.Max(m.w, float64(horizontalConnectors-1)*cfg.LaneSpacing+margin)
+	}
+	if verticalConnectors > 0 {
+		m.h = math.Max(m.h, float64(verticalConnectors-1)*cfg.LaneSpacing+margin)
+	}
 	return m
+}
+
+func hierarchyConnectorCapacity(capacity map[string]int, elementID string, side Side) int {
+	prefix := elementID + ":" + string(side) + ":riser:"
+	total := 0
+	for resource, count := range capacity {
+		if strings.HasPrefix(resource, prefix) {
+			total += count
+		}
+	}
+	return total
 }
 
 func springCount(element *Element) int {

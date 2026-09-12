@@ -13,10 +13,15 @@ type seamPins struct {
 	spec      *seamSpec
 }
 
-type crossbarUse struct {
-	route     *routedEdge
-	spec      crossbarSpec
-	preferred float64
+type connectorUse struct {
+	route      *routedEdge
+	first      int
+	domain     connectorDomain
+	preferred  float64
+	low        float64
+	high       float64
+	priority   int
+	coordinate float64
 }
 
 // assignSeamTracks solves each sibling seam as an independent channel-routing
@@ -81,66 +86,112 @@ func assignSeamTracks(doc *Document, l *layout, plan *routingPlan, ports map[por
 	return grew, nil
 }
 
-// assignCrossbarTracks shares each sibling gap between direct seam access legs
-// and generated crossbars. Direct endpoints keep their exact port coordinate;
-// movable crossbars shift locally and gain short shoulders at both boundaries.
-func assignCrossbarTracks(doc *Document, l *layout, plan *routingPlan, routes *routeResult, ports map[portKey]point, cfg Config) error {
-	forbidden := make(map[string][]float64)
-	for edgeIndex, edge := range doc.Edges {
-		spec := plan.Seams[edgeIndex]
-		if spec == nil {
-			continue
-		}
-		first, second, err := physicalSeamPins(l, edge, edgeIndex, spec, ports)
-		if err != nil {
-			return err
-		}
-		forbidden[spec.ID] = append(forbidden[spec.ID], first, second)
-	}
+// assignConnectorTracks allocates all collinear uses of a shared connector
+// domain together. Prescribed seam uses are considered first, preserving their
+// straight coordinate when possible; searched routes move locally around them.
+// It returns hierarchy-domain capacity for the layout fixed point.
+func assignConnectorTracks(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg Config) map[string]int {
+	groups := collectConnectorUses(routes, plan, ports, cfg)
+	routes.ConnectorUses = make(map[string][]int)
+	capacity := make(map[string]int)
+	assigned := make(map[*routedEdge]map[int]float64)
 
-	groups := make(map[string][]crossbarUse)
-	for _, route := range routes.Edges {
-		seen := make(map[string]bool)
-		for segmentIndex, resource := range route.Channels {
-			spec, ok := routes.Crossbars[resource]
-			if !ok || seen[resource] || sameCoordinate(spec.Low, spec.High) {
-				continue
-			}
-			seen[resource] = true
-			preferred := physicalRunCoordinate(route, segmentIndex, routes, ports, cfg)
-			preferred = math.Max(spec.Low, math.Min(spec.High, preferred))
-			groups[spec.SeamID] = append(groups[spec.SeamID], crossbarUse{
-				route: route, spec: spec, preferred: preferred,
-			})
-		}
-	}
-
-	assigned := make(map[*routedEdge]map[string]float64)
-	for _, seamID := range sortedCrossbarSeamIDs(groups) {
-		uses := groups[seamID]
+	for _, domainID := range sortedConnectorDomainIDs(groups) {
+		uses := groups[domainID]
 		sort.SliceStable(uses, func(i, j int) bool {
+			if uses[i].priority != uses[j].priority {
+				return uses[i].priority < uses[j].priority
+			}
 			if uses[i].route.EdgeIndex != uses[j].route.EdgeIndex {
 				return uses[i].route.EdgeIndex < uses[j].route.EdgeIndex
 			}
-			return uses[i].spec.ID < uses[j].spec.ID
+			return uses[i].first < uses[j].first
 		})
 		chosen := make([]float64, 0, len(uses))
 		for _, use := range uses {
-			occupied := append([]float64(nil), forbidden[seamID]...)
-			occupied = append(occupied, chosen...)
-			coordinate := avoidCoordinates(use.preferred, use.spec.Low, use.spec.High,
-				nil, occupied, cfg.LaneSpacing)
+			use.coordinate = allocateConnectorCoordinate(use.preferred, use.low, use.high,
+				chosen, cfg.LaneSpacing)
+			chosen = append(chosen, use.coordinate)
 			if assigned[use.route] == nil {
-				assigned[use.route] = make(map[string]float64)
+				assigned[use.route] = make(map[int]float64)
 			}
-			assigned[use.route][use.spec.ID] = coordinate
-			chosen = append(chosen, coordinate)
+			assigned[use.route][use.first] = use.coordinate
+			routes.ConnectorUses[domainID] = append(routes.ConnectorUses[domainID], use.route.EdgeIndex)
+		}
+		if uses[0].domain.Kind == connectorHierarchy {
+			capacity[domainID] = len(uses)
 		}
 	}
 	for route, tracks := range assigned {
-		rewriteCrossbarTracks(route, routes.Crossbars, tracks)
+		rewriteConnectorTracks(route, tracks)
 	}
-	return nil
+	return capacity
+}
+
+func allocateConnectorCoordinate(preferred, low, high float64, chosen []float64, spacing float64) float64 {
+	available := func(value float64, requireSpacing bool) bool {
+		for _, other := range chosen {
+			if sameCoordinate(value, other) || requireSpacing && math.Abs(value-other) < spacing {
+				return false
+			}
+		}
+		return true
+	}
+	if available(preferred, true) {
+		return preferred
+	}
+	for distance := 1; distance <= len(chosen)+2; distance++ {
+		for _, direction := range []float64{-1, 1} {
+			candidate := preferred + direction*float64(distance)*spacing
+			if candidate >= low && candidate <= high && available(candidate, true) {
+				return candidate
+			}
+		}
+	}
+	// Custom configurations can make the domain narrower than its requested
+	// lane spacing. Keep tracks distinct even when ideal spacing is impossible.
+	for index := 1; index <= len(chosen)+1; index++ {
+		candidate := low + (high-low)*float64(index)/float64(len(chosen)+2)
+		if available(candidate, false) {
+			return candidate
+		}
+	}
+	return preferred
+}
+
+func collectConnectorUses(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg Config) map[string][]*connectorUse {
+	groups := make(map[string][]*connectorUse)
+	for _, route := range routes.Edges {
+		for first := 0; first < len(route.Domains); {
+			domain, ok := routes.Domains[route.Domains[first]]
+			if !ok {
+				first++
+				continue
+			}
+			last := first
+			for last+1 < len(route.Domains) && route.Domains[last+1] == domain.ID {
+				last++
+			}
+			low, high := domain.Low, domain.High
+			if resource := route.Resources[first]; resource != "" {
+				if spec, found := routes.Connectors[resource]; found {
+					low, high = spec.Low, spec.High
+				}
+			}
+			preferred := physicalRunCoordinate(route, first, routes, ports, cfg)
+			preferred = math.Max(low, math.Min(high, preferred))
+			priority := 1
+			if plan.Seams[route.EdgeIndex] != nil {
+				priority = 0
+			}
+			groups[domain.ID] = append(groups[domain.ID], &connectorUse{
+				route: route, first: first, domain: domain,
+				preferred: preferred, low: low, high: high, priority: priority,
+			})
+			first = last + 1
+		}
+	}
+	return groups
 }
 
 // physicalRunCoordinate predicts the final coordinate of the straight run
@@ -152,7 +203,7 @@ func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeRes
 	for first > 0 && (route.Points[first-1].Y == route.Points[first].Y) == horizontal {
 		first--
 	}
-	for last+1 < len(route.Channels) && (route.Points[last+1].Y == route.Points[last+2].Y) == horizontal {
+	for last+1 < len(route.Domains) && (route.Points[last+1].Y == route.Points[last+2].Y) == horizontal {
 		last++
 	}
 
@@ -168,7 +219,7 @@ func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeRes
 		}
 		return port.X
 	}
-	if last == len(route.Channels)-1 {
+	if last == len(route.Domains)-1 {
 		port := ports[portKey{node: route.To, side: route.ToSide, edge: route.EdgeIndex, to: true}]
 		if horizontal {
 			return port.Y
@@ -178,46 +229,52 @@ func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeRes
 	return coordinate
 }
 
-func rewriteCrossbarTracks(route *routedEdge, specs map[string]crossbarSpec, tracks map[string]float64) {
+func rewriteConnectorTracks(route *routedEdge, tracks map[int]float64) {
 	points := []point{route.Points[0]}
-	channels := make([]string, 0, len(route.Channels)+2*len(tracks))
-	appendPoint := func(p point, resource string) {
+	resources := make([]string, 0, len(route.Resources)+2*len(tracks))
+	domains := make([]string, 0, len(route.Domains)+2*len(tracks))
+	appendPoint := func(p point, resource, domain string) {
 		if points[len(points)-1] == p {
 			return
 		}
 		points = append(points, p)
-		channels = append(channels, resource)
+		resources = append(resources, resource)
+		domains = append(domains, domain)
 	}
 
-	for index := 0; index < len(route.Channels); {
-		resource := route.Channels[index]
-		coordinate, shifted := tracks[resource]
-		if !shifted {
-			appendPoint(route.Points[index+1], resource)
+	for index := 0; index < len(route.Domains); {
+		coordinate, allocated := tracks[index]
+		resource, domain := route.Resources[index], route.Domains[index]
+		if !allocated {
+			appendPoint(route.Points[index+1], resource, domain)
 			index++
 			continue
 		}
 		last := index
-		for last+1 < len(route.Channels) && route.Channels[last+1] == resource {
+		for last+1 < len(route.Domains) && route.Domains[last+1] == domain {
 			last++
 		}
-		spec := specs[resource]
 		start, end := route.Points[index], route.Points[last+1]
 		shiftedStart, shiftedEnd := start, end
-		if spec.Horizontal {
+		if start.Y == end.Y {
 			shiftedStart.Y, shiftedEnd.Y = coordinate, coordinate
 		} else {
 			shiftedStart.X, shiftedEnd.X = coordinate, coordinate
 		}
-		appendPoint(shiftedStart, "")
-		appendPoint(shiftedEnd, "")
-		appendPoint(end, "")
+		if shiftedStart == start && shiftedEnd == end {
+			appendPoint(end, resource, domain)
+			index = last + 1
+			continue
+		}
+		appendPoint(shiftedStart, "", "")
+		appendPoint(shiftedEnd, resource, domain)
+		appendPoint(end, "", "")
 		index = last + 1
 	}
-	route.Points, route.Channels = points, channels
+	route.Points, route.Resources, route.Domains = simplifyRoute(points, resources, domains)
 }
 
-func sortedCrossbarSeamIDs(groups map[string][]crossbarUse) []string {
+func sortedConnectorDomainIDs(groups map[string][]*connectorUse) []string {
 	ids := make([]string, 0, len(groups))
 	for id := range groups {
 		ids = append(ids, id)

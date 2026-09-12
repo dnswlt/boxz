@@ -37,6 +37,8 @@ Debug colors:
 | `11-vertical-springs` | The transposed spring behavior in columns |
 | `12-container-labels` | Visible group strips, crossing avoidance, alignment, and truncation |
 | `13-min-border-slide` | Exact seam ports without endpoint legs along node borders |
+| `14-hierarchy-riser-lanes` | Separate connector tracks for routes crossing one container hierarchy boundary |
+| `15-seam-connector-sharing` | Shared allocation between direct seam exposure and an outer hierarchy route |
 
 The first comment in each `.boxz` file repeats its visual acceptance criterion,
 so an individual example remains useful outside the contact sheet.

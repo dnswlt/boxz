@@ -21,7 +21,7 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 
 	displayRoutes := make([][]point, len(routes.Edges))
 	for index, route := range routes.Edges {
-		displayRoutes[index] = displayRoute(route, routes, ports, cfg)
+		displayRoutes[index] = route.Display
 	}
 	labels := placeGroupLabels(l.Root, displayRoutes, cfg)
 	var svg strings.Builder
@@ -195,208 +195,6 @@ func clamp(value, low, high float64) float64 {
 	return math.Max(low, math.Min(high, value))
 }
 
-// solve alternates layout and routing until every outer channel and sibling
-// seam has enough room for the tracks assigned to it.
-func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point, error) {
-	plan, err := buildRoutingPlan(doc)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	// Outer-channel and cyclic-seam demand is only known after routing, while
-	// routing needs coordinates. Rebuild until every track fits. Allocations only
-	// grow, which makes the loop monotonic and prevents layout oscillation.
-	allocated := make(map[string]int)
-	for iteration := 0; iteration < len(doc.Edges)*2+4; iteration++ {
-		l, err := buildLayout(doc, cfg, allocated, plan)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		routes, err := routeDocument(doc, l, plan, cfg)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		grew := false
-		for channelName, count := range routes.LaneCounts {
-			if count > allocated[channelName] {
-				allocated[channelName] = count
-				grew = true
-			}
-		}
-		ports := allocatePorts(l, routes)
-		seamGrew, err := assignSeamTracks(doc, l, plan, ports, cfg)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		grew = grew || seamGrew
-		if !grew {
-			if err := rerouteSeams(doc, l, plan, routes, ports, cfg); err != nil {
-				return nil, nil, nil, err
-			}
-			if err := assignCrossbarTracks(doc, l, plan, routes, ports, cfg); err != nil {
-				return nil, nil, nil, err
-			}
-			return l, routes, ports, nil
-		}
-	}
-	return nil, nil, nil, fmt.Errorf("boxz: routing-space sizing did not converge")
-}
-
-type portKey struct {
-	node string
-	side Side
-	edge int
-	to   bool
-}
-
-// allocatePorts gives every routed endpoint a distinct, stable point on its
-// chosen node side.
-func allocatePorts(l *layout, routes *routeResult) map[portKey]point {
-	type use struct {
-		edge int
-		to   bool
-	}
-	groups := make(map[string]map[Side][]use)
-	for _, route := range routes.Edges {
-		if groups[route.From] == nil {
-			groups[route.From] = make(map[Side][]use)
-		}
-		if groups[route.To] == nil {
-			groups[route.To] = make(map[Side][]use)
-		}
-		groups[route.From][route.FromSide] = append(groups[route.From][route.FromSide], use{edge: route.EdgeIndex})
-		groups[route.To][route.ToSide] = append(groups[route.To][route.ToSide], use{edge: route.EdgeIndex, to: true})
-	}
-
-	// Routing chooses sides, then ports are spread evenly and deterministically
-	// along each side. Measuring reserved enough side length for this count.
-	result := make(map[portKey]point)
-	for nodeID, sides := range groups {
-		placed := l.ByID[nodeID]
-		if placed == nil {
-			continue
-		}
-		for side, uses := range sides {
-			sort.SliceStable(uses, func(i, j int) bool {
-				if uses[i].edge != uses[j].edge {
-					return uses[i].edge < uses[j].edge
-				}
-				return !uses[i].to && uses[j].to
-			})
-			for index, endpointUse := range uses {
-				fraction := float64(index+1) / float64(len(uses)+1)
-				var p point
-				switch side {
-				case North:
-					p = point{X: placed.Rect.X + placed.Rect.W*fraction, Y: placed.Rect.Y}
-				case South:
-					p = point{X: placed.Rect.X + placed.Rect.W*fraction, Y: placed.Rect.Y + placed.Rect.H}
-				case West:
-					p = point{X: placed.Rect.X, Y: placed.Rect.Y + placed.Rect.H*fraction}
-				case East:
-					p = point{X: placed.Rect.X + placed.Rect.W, Y: placed.Rect.Y + placed.Rect.H*fraction}
-				}
-				result[portKey{node: nodeID, side: side, edge: endpointUse.edge, to: endpointUse.to}] = p
-			}
-		}
-	}
-	return result
-}
-
-// displayRoute converts a center-line graph path to its assigned lane and exact
-// node ports without introducing lane-width jogs.
-func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg Config) []point {
-	type straightRun struct {
-		a          point
-		b          point
-		horizontal bool
-	}
-	if len(route.Channels) == 0 {
-		return route.Points
-	}
-	// Seam routes already contain final track coordinates and therefore have
-	// empty channel tags. Named outer-channel runs still need lane offsets. Both
-	// route kinds need projection from center-line geometry to exact node ports.
-
-	// A route can cross from a channel into a collinear hierarchy riser. Offset
-	// the whole straight run as one unit; offsetting its graph segments
-	// independently creates a meaningless lane-width jog at their boundary.
-	var runs []straightRun
-	for first := 0; first < len(route.Channels); {
-		horizontal := route.Points[first].Y == route.Points[first+1].Y
-		last := first
-		for last+1 < len(route.Channels) {
-			nextHorizontal := route.Points[last+1].Y == route.Points[last+2].Y
-			if nextHorizontal != horizontal {
-				break
-			}
-			last++
-		}
-
-		a, b := route.Points[first], route.Points[last+1]
-		offset := routeRunOffset(route, routes, first, last, cfg)
-		if horizontal {
-			a.Y += offset
-			b.Y += offset
-		} else {
-			a.X += offset
-			b.X += offset
-		}
-		runs = append(runs, straightRun{a: a, b: b, horizontal: horizontal})
-		first = last + 1
-	}
-
-	points := []point{runs[0].a}
-	for index := 1; index < len(runs); index++ {
-		previous, current := runs[index-1], runs[index]
-		joint := point{X: previous.b.X, Y: current.a.Y}
-		if previous.horizontal {
-			joint = point{X: current.a.X, Y: previous.b.Y}
-		}
-		points = append(points, joint)
-	}
-	points = append(points, runs[len(runs)-1].b)
-
-	fromPort := ports[portKey{node: route.From, side: route.FromSide, edge: route.EdgeIndex}]
-	toPort := ports[portKey{node: route.To, side: route.ToSide, edge: route.EdgeIndex, to: true}]
-	if len(points) >= 2 {
-		projection := point{X: fromPort.X, Y: points[1].Y}
-		if route.FromSide == West || route.FromSide == East {
-			projection = point{X: points[1].X, Y: fromPort.Y}
-		}
-		points = append([]point{fromPort, projection}, points[1:]...)
-		last := len(points) - 1
-		projection = point{X: toPort.X, Y: points[last-1].Y}
-		if route.ToSide == West || route.ToSide == East {
-			projection = point{X: points[last-1].X, Y: toPort.Y}
-		}
-		points = append(points[:last], projection, toPort)
-	}
-	return simplifyPoints(points)
-}
-
-func simplifyPoints(points []point) []point {
-	result := make([]point, 0, len(points))
-	for _, p := range points {
-		result = append(result, p)
-		for {
-			if len(result) >= 2 && result[len(result)-2] == result[len(result)-1] {
-				result = result[:len(result)-1]
-				continue
-			}
-			if len(result) >= 3 {
-				a, b, c := result[len(result)-3], result[len(result)-2], result[len(result)-1]
-				if (a.X == b.X && b.X == c.X) || (a.Y == b.Y && b.Y == c.Y) {
-					result[len(result)-2] = c
-					result = result[:len(result)-1]
-					continue
-				}
-			}
-			break
-		}
-	}
-	return result
-}
-
 func writeNodes(svg *strings.Builder, p *placement) {
 	if p.Element.Kind == KindNode {
 		fmt.Fprintf(svg, "    <g class=\"boxz-node-group\" data-node=\"%s\">\n", html.EscapeString(p.Element.ID))
@@ -460,18 +258,21 @@ func writeRoutingGraph(svg *strings.Builder, routes *routeResult) {
 			continue
 		}
 		kind := "channel"
-		if s.channel == "" {
+		if s.kind == segmentRiser {
 			kind = "riser"
-		} else if _, ok := routes.Crossbars[s.channel]; ok {
+		} else if s.kind == segmentCrossbar {
 			kind = "crossbar"
 		}
 		class := "boxz-debug-route boxz-debug-" + kind
-		if len(routes.ChannelUses[s.channel]) != 0 {
+		if len(routes.ResourceUses[s.resource]) != 0 || len(routes.ChannelUses[s.domain]) != 0 || len(routes.ConnectorUses[s.domain]) != 0 {
 			class += " boxz-debug-used"
 		}
 		fmt.Fprintf(svg, "    <line class=\"%s\"", class)
-		if s.channel != "" {
-			fmt.Fprintf(svg, " data-resource=\"%s\"", html.EscapeString(s.channel))
+		if s.resource != "" {
+			fmt.Fprintf(svg, " data-resource=\"%s\"", html.EscapeString(s.resource))
+		}
+		if s.domain != "" && s.domain != s.resource {
+			fmt.Fprintf(svg, " data-domain=\"%s\"", html.EscapeString(s.domain))
 		}
 		fmt.Fprintf(svg, " x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\"/>\n",
 			number(s.A.X), number(s.A.Y), number(s.B.X), number(s.B.Y))

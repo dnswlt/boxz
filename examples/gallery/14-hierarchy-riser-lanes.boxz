@@ -1,0 +1,18 @@
+// Inspect: routes changing level through c4 use separate hierarchy-connector tracks instead of merging into one trunk.
+hbox root {
+  node n1 "xxxxx"
+  node n2 "xxxxx"
+  node n3 "xxxxx"
+  hbox c4 {
+    node n5 "xxxxxxxx"
+    node n6 "xxxxxxxxxx"
+  }
+}
+
+edges {
+  n5 -> n3
+  n2 -> n1
+  n5 -> n2
+  n3 -> n6
+  n3 -> n6
+}

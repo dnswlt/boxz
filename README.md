@@ -52,6 +52,8 @@ Debug output changes only the visualization, not layout or routing.
 
 ## Documentation
 
+- [Concepts](docs/concepts.md): the high-level model for authored node layout,
+  automatic edge routing, stability, and related work.
 - [Language reference](docs/language.md): nodes, boxes, edges, attributes, and
   the complete grammar.
 - [Springs](docs/springs.md): relational spacing, alignment, and expandable
