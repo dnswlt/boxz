@@ -1,6 +1,10 @@
 package boxz
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"unicode"
+)
 
 // seamSpec identifies the boundary between two adjacent children of a
 // container. Routes through a seam have fixed endpoint sides, independent of
@@ -221,7 +225,7 @@ func incrementPort(counts map[string]map[Side]int, nodeID string, side Side) {
 }
 
 func seamID(parentID string, firstChild int) string {
-	return fmt.Sprintf("%s:seam:%d", parentID, firstChild)
+	return fmt.Sprintf("%s:seam:%d", keyPart(parentID), firstChild)
 }
 
 func absInt(value int) int {
@@ -229,4 +233,16 @@ func absInt(value int) int {
 		return -value
 	}
 	return value
+}
+
+// keyPart embeds an element ID in a colon-separated routing key. Plain
+// identifiers pass through; any other ID is quoted, so it cannot equal a plain
+// one and ends unambiguously at its closing quote.
+func keyPart(id string) string {
+	for index, r := range id {
+		if r != '_' && !unicode.IsLetter(r) && (index == 0 || !unicode.IsDigit(r)) {
+			return strconv.Quote(id)
+		}
+	}
+	return id
 }

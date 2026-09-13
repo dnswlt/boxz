@@ -295,7 +295,7 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 }
 
 func hierarchyConnectorCapacity(capacity map[string]int, elementID string, side Side) int {
-	prefix := elementID + ":" + string(side) + ":riser:"
+	prefix := keyPart(elementID) + ":" + string(side) + ":riser:"
 	total := 0
 	for resource, count := range capacity {
 		if strings.HasPrefix(resource, prefix) {
@@ -468,7 +468,7 @@ func addChannel(result *layout, owner *placement, side Side, a, b point) {
 	result.Channels[c.ID] = c
 }
 
-func channelID(owner string, side Side) string { return owner + ":" + string(side) }
+func channelID(owner string, side Side) string { return keyPart(owner) + ":" + string(side) }
 
 func maxInt(left, right int) int {
 	if left > right {

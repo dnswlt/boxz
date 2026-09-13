@@ -205,3 +205,15 @@ func parseFile(t *testing.T, filename string) *Document {
 	}
 	return doc
 }
+
+// The canvas frame uses colon obstacle IDs, which a quoted node ID can spell.
+func TestAvoidRoutesQuotedIdentifiers(t *testing.T) {
+	cfg := avoidConfig(t)
+	doc, err := ParseString("frame.boxz", "vbox root {\n  node `canvas:north`\n  node b\n}\nedges {\n  `canvas:north` -> b\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := solve(doc, cfg); err != nil {
+		t.Fatal(err)
+	}
+}

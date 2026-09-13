@@ -807,6 +807,77 @@ func TestParseRejectsNodeBodyAndEmptyContainer(t *testing.T) {
 	}
 }
 
+func TestParseQuotedIdentifiers(t *testing.T) {
+	source := "vbox `system:core` {\n" +
+		"  node `api-server`\n" +
+		"  node `C:\\tmp` \"Temp\"\n" +
+		"  node db\n" +
+		"  node `stra\u00dfe`\n" +
+		"}\n" +
+		"edges {\n" +
+		"  `api-server`:S -> `C:\\tmp`\n" +
+		"  `C:\\tmp` -> `db`\n" +
+		"}\n"
+	doc, err := ParseString("quoted.boxz", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Root.ID != "system:core" {
+		t.Errorf("root ID = %q, want system:core", doc.Root.ID)
+	}
+	api := doc.Root.Children[0]
+	if api.ID != "api-server" || api.Title != "api-server" {
+		t.Errorf("node = %q titled %q, want api-server for both", api.ID, api.Title)
+	}
+	if got := doc.Root.Children[1].ID; got != `C:\tmp` {
+		t.Errorf("node ID = %q, want the backslash taken literally", got)
+	}
+	first, second := doc.Edges[0], doc.Edges[1]
+	if first.From != "api-server" || first.FromSide == nil || *first.FromSide != South || first.To != `C:\tmp` {
+		t.Errorf("first edge = %q:%v -> %q", first.From, first.FromSide, first.To)
+	}
+	if got := doc.Root.Children[3].ID; got != "stra\u00dfe" {
+		t.Errorf("node ID = %q, want non-ASCII letters accepted", got)
+	}
+	if second.To != "db" {
+		t.Errorf("`db` resolved to %q, want the same node as db", second.To)
+	}
+}
+
+func TestParseRejectsInvalidQuotedIdentifiers(t *testing.T) {
+	for name, tc := range map[string]struct{ source, want string }{
+		"empty":      {"hbox root { node `` }", "empty quoted identifier"},
+		"line break": {"hbox root { node `a\nb` }", "U+000A"},
+		"space":      {"hbox root { node `a b` }", "U+0020"},
+		"tab":        {"hbox root { node `a\tb` }", "U+0009"},
+		"control":    {"hbox root { node `a\x01b` }", "U+0001"},
+		"emoji":      {"hbox root { node `a\U0001F600` }", "U+1F600"},
+		"symbol":     {"hbox root { node `a\u2192b` }", "U+2192"},
+		"duplicate":  {"hbox root { node a node `a` }", "duplicate element ID"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseString("invalid.boxz", tc.source)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Quoted identifiers can contain the colons that separate routing key parts.
+func TestRoutingKeysDistinguishQuotedIdentifiers(t *testing.T) {
+	if gutterChannelID("a", North) == channelID("a:gutter", North) {
+		t.Errorf("gutter of a and channel of `a:gutter` share key %q", gutterChannelID("a", North))
+	}
+	capacity := map[string]int{
+		riserID("a:N:riser:x", South, 0): 5,
+		channelID("a:N:riser:x", South):  3,
+	}
+	if got := hierarchyConnectorCapacity(capacity, "a", North); got != 0 {
+		t.Errorf("connector capacity of a = %d, want 0: it counted keys of `a:N:riser:x`", got)
+	}
+}
+
 func TestParseRejectsImpossibleSide(t *testing.T) {
 	_, err := ParseString("side.boxz", `hbox root { node a node b node c }
 edges { a:E -> c }`)

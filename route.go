@@ -801,7 +801,7 @@ func sortedUniqueCoordinates(values []float64) []float64 {
 }
 
 func crossbarID(parentID string, firstChild, index int) string {
-	return fmt.Sprintf("%s:crossbar:%d:%d", parentID, firstChild, index)
+	return fmt.Sprintf("%s:crossbar:%d:%d", keyPart(parentID), firstChild, index)
 }
 
 func seamConnectorDomainID(seamID string) string { return seamID + ":connector" }
@@ -809,7 +809,7 @@ func seamConnectorDomainID(seamID string) string { return seamID + ":connector" 
 func seamChannelID(seamID string) string { return seamID + ":channel" }
 
 func gutterChannelID(ownerID string, side Side) string {
-	return fmt.Sprintf("%s:gutter:%s", ownerID, side)
+	return fmt.Sprintf("%s:gutter:%s", keyPart(ownerID), side)
 }
 
 func mergeConnectorDomain(domains map[string]connectorDomain, candidate connectorDomain) {
@@ -929,7 +929,7 @@ func hierarchyPortals(child *placement, side Side) []hierarchyPortal {
 }
 
 func riserID(childID string, side Side, portalIndex int) string {
-	return fmt.Sprintf("%s:%s:riser:%d", childID, side, portalIndex)
+	return fmt.Sprintf("%s:%s:riser:%d", keyPart(childID), side, portalIndex)
 }
 
 func setPort(ports map[string]map[Side]point, nodeID string, side Side, p point) {

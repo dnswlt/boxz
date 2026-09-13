@@ -14,6 +14,17 @@ node database
 node api "API Server"
 ```
 
+A plain identifier is a letter or underscore followed by letters, digits, and
+underscores. An identifier that also needs punctuation goes in backticks. Its
+content is literal, with no escapes, and may contain letters, digits, and
+printable ASCII punctuation; whitespace, control characters, and other symbols
+are rejected. `` `api` `` and `api` name the same element.
+
+```boxz
+node `api-server` "API Server"
+node `db:primary`
+```
+
 An `hbox` arranges its contents from west to east. A `vbox` arranges them from
 north to south. Containers must contain at least one actual element and may be
 nested freely. An optional quoted title adds a top-aligned label and makes the
@@ -110,14 +121,15 @@ node api /* an inline block comment */
 ```text
 document   = element [ edge-block ]
 element    = node | hbox | vbox
-node       = "node" identifier [ string ] [ attributes ]
-hbox       = "hbox" identifier [ string ] [ attributes ] "{" { item } "}"
-vbox       = "vbox" identifier [ string ] [ attributes ] "{" { item } "}"
+node       = "node" id [ string ] [ attributes ]
+hbox       = "hbox" id [ string ] [ attributes ] "{" { item } "}"
+vbox       = "vbox" id [ string ] [ attributes ] "{" { item } "}"
+id         = identifier | "`" char { char } "`"   (char: letter, digit, or ASCII punctuation)
 item       = element | "spring"
 
 edge-block = "edges" "{" { edge } "}"
 edge       = endpoint "->" endpoint
-endpoint   = identifier [ ":" side ]
+endpoint   = id [ ":" side ]
 side       = "N" | "E" | "S" | "W"
 
 attributes = "[" [ attribute { "," attribute } [ "," ] ] "]"

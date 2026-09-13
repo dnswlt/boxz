@@ -139,7 +139,7 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 	var visit func(*placement)
 	visit = func(p *placement) {
 		if p.Element.Kind == KindNode {
-			obstacle := avoid.Obstacle{ID: p.Element.ID, Rect: avoidRect(p.Rect), ExclusivePorts: &shared}
+			obstacle := avoid.Obstacle{ID: keyPart(p.Element.ID), Rect: avoidRect(p.Rect), ExclusivePorts: &shared}
 			sides := make(map[Side][]string)
 			for _, side := range []Side{North, East, South, West} {
 				count := plan.PortCount[p.Element.ID][side]
@@ -197,7 +197,7 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 // avoidEndpoint restricts an endpoint to one side when the source constrained
 // it. Topology validation has already rejected a side the node cannot offer.
 func avoidEndpoint(node string, side *Side, portsBySide map[string]map[Side][]string) (avoid.Endpoint, error) {
-	endpoint := avoid.Endpoint{Obstacle: node}
+	endpoint := avoid.Endpoint{Obstacle: keyPart(node)}
 	if side == nil {
 		return endpoint, nil
 	}
@@ -209,7 +209,8 @@ func avoidEndpoint(node string, side *Side, portsBySide map[string]map[Side][]st
 	return endpoint, nil
 }
 
-// canvasFrame returns four obstacles enclosing the canvas.
+// canvasFrame returns four obstacles enclosing the canvas. Their IDs contain a
+// colon, which keyPart never leaves unquoted in a node's obstacle ID.
 func canvasFrame(l *layout) []avoid.Obstacle {
 	const thickness = 1000
 	return []avoid.Obstacle{

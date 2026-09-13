@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
@@ -91,7 +93,7 @@ type syntaxDocument struct {
 type syntaxElement struct {
 	Pos        lexer.Position
 	Kind       string            `parser:"@Ident"`
-	ID         string            `parser:"@Ident"`
+	ID         string            `parser:"@(Ident | RawString)"`
 	Title      *string           `parser:"(@String)?"`
 	Attributes *syntaxAttributes `parser:"@@?"`
 	Body       *syntaxBody       `parser:"@@?"`
@@ -139,14 +141,42 @@ type syntaxEdge struct {
 }
 
 type syntaxEndpoint struct {
-	ID   string  `parser:"@Ident"`
+	ID   string  `parser:"@(Ident | RawString)"`
 	Side *string `parser:"( ':' @Ident )?"`
 }
 
 var documentParser = participle.MustBuild[syntaxDocument](
 	participle.UseLookahead(2),
 	participle.Unquote("String"),
+	participle.Map(unquoteIdentifier, "RawString"),
 )
+
+// unquoteIdentifier strips the backticks from a quoted identifier. The content
+// is literal, with no escapes.
+func unquoteIdentifier(token lexer.Token) (lexer.Token, error) {
+	id := token.Value[1 : len(token.Value)-1]
+	if id == "" {
+		return token, participle.Errorf(token.Pos, "empty quoted identifier")
+	}
+	for _, r := range id {
+		if !quotedIdentifierRune(r) {
+			return token, participle.Errorf(token.Pos,
+				"quoted identifier %q contains %q (%U); use letters, digits, and ASCII punctuation", id, r, r)
+		}
+	}
+	token.Value = id
+	return token, nil
+}
+
+// quotedIdentifierRune accepts the letters and digits of a plain identifier
+// plus printable ASCII punctuation. Whitespace, control characters, and other
+// symbols are rejected; control characters would also make the SVG invalid.
+func quotedIdentifierRune(r rune) bool {
+	if r < utf8.RuneSelf {
+		return r > ' ' && r < 0x7f
+	}
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
 
 // Parse reads a boxz document. The filename is used in diagnostics only.
 func Parse(filename string, r io.Reader) (*Document, error) {
