@@ -9,7 +9,7 @@ The rendering pipeline is:
 ```text
 source -> syntax tree -> topology plan
        -> [measure/place -> route intents -> track allocation]*
-       -> exact polylines -> SVG
+       -> exact polylines -> local refinement -> SVG
 ```
 
 The routing plan contains decisions that depend only on source topology. The
@@ -29,9 +29,10 @@ More precisely, one iteration:
 5. repeats if any local routing domain needs more capacity.
 
 Once allocations are stable, the solver materializes exact orthogonal
-polylines. It returns those paths together with the same port map used to build
-them. SVG rendering only paints solved geometry; it does not allocate ports,
-move tracks, or repair endpoints.
+polylines and runs bounded local refinements that can remove unnecessary bends
+without changing ports or bounded-region crossings. It returns those paths
+together with the same port map used to build them. SVG rendering only paints
+solved geometry; it does not allocate ports, move tracks, or repair endpoints.
 
 The implementation follows those phase boundaries:
 
@@ -42,6 +43,7 @@ The implementation follows those phase boundaries:
 - `route.go` constructs the structural graph and finds outer routes;
 - `seam.go` assigns physical seam and movable-connector tracks;
 - `solve.go` owns the fixed point, port allocation, and path materialization;
+- `refine.go` applies legal local simplifications to exact display paths;
 - `svg.go` places labels and renders the solved layout.
 
 ## Model
@@ -301,6 +303,26 @@ paths already start and end at their allocated ports, making this projection a
 no-op for them. Arrowheads and styling are SVG concerns and do not participate
 in layout or routing.
 
+### Local route refinement
+
+Once every route has exact display geometry, `refine.go` scans bounded windows
+for strictly simpler Manhattan replacements. Candidate coordinates come from
+existing vertices; the refiner does not perform another free-space route
+search. A shared legality predicate preserves ports, endpoint directions, and
+the ordered crossing points of bounded-container boundaries, then checks nodes,
+self-intersections, other routes, false junctions, and local clearance.
+
+Rules are deterministic candidate generators. The current minimal-Manhattan
+rule emits at most two candidates for a window of at most five segments. The
+best legal candidate must reduce `(bend count, length)` lexicographically;
+after applying it, the route is rescanned. This makes the pass extensible while
+bounding its work and guaranteeing termination. Routes are refined in source
+order, so later routes see earlier routes' final display geometry.
+
+Refinement changes only `routedEdge.Display`. Center-line intent, graph-resource
+use, track-domain use, and allocated layout capacity remain intact for debug
+rendering and diagnostics. See [Route refinement](route-refinement.md).
+
 Container labels are also a display concern after their fixed strip has been
 reserved. Once lane-offset display routes are known, an automatically aligned
 label runs a one-dimensional sweep over route-intersection events in its strip.
@@ -345,6 +367,8 @@ carry `data-domain`.
 - Seam track ordering depends only on final port alignment within that seam.
 - Final seam paths begin and end at the same allocated ports returned to the
   renderer.
+- Local refinement preserves endpoint ports and bounded-region crossing points
+  and never feeds reduced demand back into layout.
 - Every display route leaves and enters its endpoint perpendicular to the node
   side; no endpoint segment runs along a node border.
 - Distinct display routes do not share a collinear segment longer than the

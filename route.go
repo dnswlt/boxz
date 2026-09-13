@@ -111,7 +111,9 @@ type routedEdge struct {
 	// Resources describe graph traversal; Domains describe physical occupancy.
 	Resources []string
 	Domains   []string
-	Display   []point
+	// Display is the exact materialized and locally refined SVG path. Points and
+	// its metadata retain the selected route intent for accounting and debug.
+	Display []point
 }
 
 type routeResult struct {

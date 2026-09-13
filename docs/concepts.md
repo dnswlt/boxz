@@ -291,6 +291,7 @@ source
       -> select route intents
       -> allocate ports and tracks]*
   -> exact orthogonal polylines
+  -> local route refinement
   -> SVG
 ```
 
@@ -305,6 +306,15 @@ are reconstructed from allocated ports, not provisional node centers, so any
 alignment jog occurs in routing space rather than along a node border. Lane
 offsets and movable connector positions are applied while preserving the
 selected route topology. Only then are redundant collinear points removed.
+
+Exact track geometry can contain small artifacts that are not meaningful route
+choices: a shifted connector may need a short shoulder, and adjacent shoulders
+can form a needless staircase. A final local refinement pass may replace a
+short polyline span with simpler Manhattan geometry. It preserves ports and
+the exact points where the edge crosses bounded-container boundaries, rejects
+node collisions, overlaps, false junctions, and self-intersections, and never
+feeds reduced demand back into layout. This is geometric cleanup of a chosen
+route, not another source of topology or placement decisions.
 
 The SVG renderer is intentionally passive. It paints solved node rectangles,
 container boundaries, polylines, arrowheads, and labels. It does not allocate

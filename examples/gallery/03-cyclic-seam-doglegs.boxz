@@ -1,4 +1,4 @@
-// Inspect: crossed connections get distinct tracks and local doglegs, never overlap.
+// Inspect: crossed connections get compact local doglegs without overlaps or unnecessary lane shoulders.
 vbox root {
   hbox upper {
     node a1 "A"

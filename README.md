@@ -60,6 +60,8 @@ Debug output changes only the visualization, not layout or routing.
   nodes.
 - [Container labels](docs/container-labels.md): visible group boundaries,
   label strips, alignment, and automatic placement.
+- [Route refinement](docs/route-refinement.md): deterministic local cleanup of
+  exact edge polylines after routing.
 - [Architecture](docs/architecture.md): layout and routing internals, phase
   boundaries, and invariants.
 - [Visual routing gallery](examples/gallery/README.md): focused examples for

@@ -26,7 +26,7 @@ Debug colors:
 | --- | --- |
 | `01-direct-seams` | Short E-W neighbor routes and aligned N-S routes |
 | `02-recursive-frontiers` | Direct routes through multiple nesting levels |
-| `03-cyclic-seam-doglegs` | Separate tracks and compact doglegs for crossed edges |
+| `03-cyclic-seam-doglegs` | Compact crossed-edge doglegs without overlaps or unnecessary lane shoulders |
 | `04-channel-lanes` | Parallel channel lanes and distinct ports |
 | `05-local-crossbars` | Local sibling-gap traversal instead of a root-channel detour |
 | `06-seam-crossbar-sharing` | No overlap between a crossbar and seam access leg |

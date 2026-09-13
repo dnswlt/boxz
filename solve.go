@@ -14,7 +14,12 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point,
 		return nil, nil, nil, err
 	}
 	if cfg.EdgeRouter == RouterAvoid {
-		return solveWithAvoid(doc, cfg, plan)
+		l, routes, ports, err := solveWithAvoid(doc, cfg, plan)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		refineDisplayRoutes(l, routes, cfg)
+		return l, routes, ports, nil
 	}
 	// Channel, connector, and cyclic-seam demand is only known after routing,
 	// while routing needs coordinates. Allocations only grow, so the loop cannot
@@ -59,6 +64,7 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point,
 		for _, route := range routes.Edges {
 			route.Display = materializeRoute(route, routes, ports, cfg)
 		}
+		refineDisplayRoutes(l, routes, cfg)
 		return l, routes, ports, nil
 	}
 	return nil, nil, nil, fmt.Errorf("boxz: routing-space sizing did not converge")
