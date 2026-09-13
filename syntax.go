@@ -38,6 +38,9 @@ const (
 // containers. Containers remain structural and cannot be edge endpoints.
 type ContainerAttributes struct {
 	LabelAlign LabelAlignment
+	// Bounded makes the container a visible routing boundary. Titles enable it
+	// by default, while an explicit attribute may override that default.
+	Bounded bool
 }
 
 // Side identifies one side of a node or layout box.
@@ -214,6 +217,7 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 		if raw.Title != nil {
 			element.Title = *raw.Title
 		}
+		element.ContainerAttributes.Bounded = element.Title != ""
 	default:
 		return nil, diagnostic(filename, raw.Pos, "unknown element kind %q", raw.Kind)
 	}
@@ -271,6 +275,12 @@ func convertAttributes(filename string, element *Element, raw *syntaxAttributes)
 				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be auto, left, center, or right", attribute.Key, element.Kind, element.ID)
 			}
 			element.ContainerAttributes.LabelAlign = alignment
+		case element.Kind != KindNode && attribute.Key == "bounded":
+			enabled, ok := booleanAttribute(attribute.Value)
+			if !ok {
+				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be a flag or boolean", attribute.Key, element.Kind, element.ID)
+			}
+			element.ContainerAttributes.Bounded = enabled
 		default:
 			return diagnostic(filename, attribute.Pos, "attribute %q is not supported on %s %q", attribute.Key, element.Kind, element.ID)
 		}

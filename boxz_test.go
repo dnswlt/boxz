@@ -106,7 +106,8 @@ vbox root "System" [labelAlign = center] {
   hbox services "Services" [labelAlign = RIGHT] {
     node api
   }
-  hbox automatic "Automatic" [labelAlign = auto] { node worker }
+  hbox automatic "Automatic" [labelAlign = auto, bounded = false] { node worker }
+  hbox boundary [bounded] { node database }
 }
 `)
 	if err != nil {
@@ -115,12 +116,21 @@ vbox root "System" [labelAlign = center] {
 	if doc.Root.Title != "System" || doc.Root.ContainerAttributes.LabelAlign != LabelAlignCenter {
 		t.Fatalf("root title/attributes = %q/%q, want System/center", doc.Root.Title, doc.Root.ContainerAttributes.LabelAlign)
 	}
+	if !doc.Root.ContainerAttributes.Bounded {
+		t.Fatal("titled root did not default to bounded")
+	}
 	services := doc.Root.Children[0]
 	if services.Title != "Services" || services.ContainerAttributes.LabelAlign != LabelAlignRight {
 		t.Fatalf("services title/attributes = %q/%q, want Services/right", services.Title, services.ContainerAttributes.LabelAlign)
 	}
 	if got := doc.Root.Children[1].ContainerAttributes.LabelAlign; got != LabelAlignAuto {
 		t.Fatalf("explicit automatic alignment = %q, want auto", got)
+	}
+	if doc.Root.Children[1].ContainerAttributes.Bounded {
+		t.Fatal("bounded = false did not override the titled default")
+	}
+	if !doc.Root.Children[2].ContainerAttributes.Bounded {
+		t.Fatal("bare bounded attribute did not bound an untitled container")
 	}
 }
 
@@ -147,6 +157,7 @@ func TestParseRejectsInvalidAttributesAndEmptySpringContainer(t *testing.T) {
 		"container attr":     {`hbox root [spring] { node a }`, "is not supported on hbox"},
 		"invalid alignment":  {`hbox root "Root" [labelAlign = north] { node a }`, "must be auto, left, center, or right"},
 		"bare alignment":     {`hbox root "Root" [labelAlign] { node a }`, "must be auto, left, center, or right"},
+		"invalid bounded":    {`hbox root [bounded = 1] { node a }`, "must be a flag or boolean"},
 		"align no title":     {`hbox root [labelAlign = left] { node a }`, "has labelAlign but no title"},
 		"old attribute name": {`hbox root "Root" [labelAnchor = left] { node a }`, "attribute \"labelAnchor\" is not supported"},
 		"only springs":       {`hbox root { spring spring }`, "must contain at least one child"},
@@ -923,6 +934,127 @@ edges { a:N -> c:N b -> c }`
 	}
 }
 
+func TestTransparentContainerSeamProvidesThroughRoute(t *testing.T) {
+	doc, err := ParseString("three-layers.boxz", `
+vbox root {
+  hbox top { node a1 node a2 }
+  hbox middle "Layout annotation" [bounded = false] { node b1 node b2 }
+  hbox bottom { node c1 node c2 }
+}
+edges { a1 -> c2 }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, routes, _, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := seamChannelID(seamID("middle", 0))
+	if !containsString(routes.Edges[0].Resources, want) {
+		t.Fatalf("route resources = %v, want transparent middle seam %q", routes.Edges[0].Resources, want)
+	}
+	if containsString(routes.Edges[0].Resources, channelID("root", West)) ||
+		containsString(routes.Edges[0].Resources, channelID("root", East)) {
+		t.Fatalf("route resources = %v, want passage through transparent middle row", routes.Edges[0].Resources)
+	}
+}
+
+func TestTransparentSingleChildContainerProvidesGutterRoute(t *testing.T) {
+	doc, err := ParseString("three-layers-single.boxz", `
+vbox root {
+  hbox top { node a1 node a2 }
+  hbox middle { node b1 }
+  hbox bottom { node c1 node c2 }
+}
+edges { a1 -> c2 }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, routes, _, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources := routes.Edges[0].Resources
+	usesGutter := containsString(resources, gutterChannelID("middle", West)) ||
+		containsString(resources, gutterChannelID("middle", East))
+	if !usesGutter {
+		t.Fatalf("route resources = %v, want a transparent middle gutter", resources)
+	}
+	if containsString(resources, channelID("root", West)) ||
+		containsString(resources, channelID("root", East)) {
+		t.Fatalf("route resources = %v, want passage through transparent middle wrapper", resources)
+	}
+}
+
+func TestSeamChannelLanesDoNotOverlapDirectSeamTracks(t *testing.T) {
+	doc, err := ParseString("mixed-seam-use.boxz", `
+vbox root {
+  hbox top { node a1 node a2 }
+  hbox middle [bounded] { node b1 node b2 }
+  hbox bottom { node c1 node c2 }
+}
+edges {
+  a2 -> b1
+  a1 -> c2
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	assertOrthogonalPaths(t, output.String())
+	assertNoCollinearEdgeOverlaps(t, output.String())
+}
+
+func TestBoundedContainerRejectsForeignTransit(t *testing.T) {
+	doc, err := ParseString("three-layers-bounded.boxz", `
+vbox root {
+  hbox top { node a1 node a2 }
+  hbox middle [bounded] { node b1 node b2 }
+  hbox bottom { node c1 node c2 }
+}
+edges { a1 -> c2 }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, routes, _, err := solve(doc, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range routes.Edges[0].Resources {
+		if strings.HasPrefix(resource, "middle:") {
+			t.Fatalf("foreign route used bounded middle resource %q: %v", resource, routes.Edges[0].Resources)
+		}
+	}
+	want := seamChannelID(seamID("root", 0))
+	if !containsString(routes.Edges[0].Resources, want) {
+		t.Fatalf("route resources = %v, want parent-owned seam channel %q", routes.Edges[0].Resources, want)
+	}
+
+	var output bytes.Buffer
+	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `class="boxz-group-boundary" data-container="middle"`) {
+		t.Fatal("bounded untitled container was not drawn")
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRenderNestedSameKindContainers(t *testing.T) {
 	source := `
 hbox outer {
@@ -1120,6 +1252,44 @@ edges {
 	}
 }
 
+func TestAcyclicSeamKeepsRetainedTrackCapacity(t *testing.T) {
+	doc, err := ParseString("retained-seam-capacity.boxz", `
+hbox root {
+  node a "A"
+  node b "B"
+}
+edges { a -> b }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := buildRoutingPlan(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const retained = 3
+	plan.SeamTrackCount[seamID("root", 0)] = retained
+	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := routeDocument(doc, l, plan, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grew {
+		t.Fatal("acyclic seam unexpectedly requested more capacity")
+	}
+	spec := plan.Seams[0]
+	if spec.TrackCount != retained || spec.FirstTrack != 1 || spec.SecondTrack != 1 {
+		t.Fatalf("seam = %#v, want centered track 1 in retained bank of 3", spec)
+	}
+}
+
 func TestOuterRoutesCrossAdjacentSiblingChannels(t *testing.T) {
 	tests := map[string]string{
 		"horizontal sibling gap": `
@@ -1301,7 +1471,7 @@ edges {
 	}
 }
 
-func TestEndpointCrossbarUsesAllocatedPortCoordinate(t *testing.T) {
+func TestInterstitialSeamTurnKeepsEndpointLegPerpendicular(t *testing.T) {
 	doc, err := ParseString("arrangement.boxz", `
 hbox root {
   vbox leftExt { node w1 node w2 node w3 node w4 }
@@ -1324,7 +1494,7 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, routes, ports, err := solve(doc, DefaultConfig())
+	_, routes, ports, err := solve(doc, DefaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1338,9 +1508,8 @@ edges {
 	if len(points) < 2 {
 		t.Fatal("e1 -> w3 route is missing")
 	}
-	centerEast := l.ByID["center"].Rect.X + l.ByID["center"].Rect.W
-	if points[0].Y != points[1].Y || points[1].X > centerEast {
-		t.Fatalf("route turns inside the sibling gap immediately after e1: %v", points)
+	if points[0].Y != points[1].Y || points[1].X >= points[0].X {
+		t.Fatalf("route does not leave e1 westward and perpendicular to its port: %v", points)
 	}
 
 	var output bytes.Buffer

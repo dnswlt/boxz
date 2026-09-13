@@ -74,9 +74,10 @@ func (r rect) center() point { return point{X: r.X + r.W/2, Y: r.Y + r.H/2} }
 
 type channel struct {
 	// A and B are the channel center line. Lanes are parallel display offsets.
-	ID string
-	A  point
-	B  point
+	ID     string
+	Region string
+	A      point
+	B      point
 }
 
 type placement struct {
@@ -88,11 +89,12 @@ type placement struct {
 }
 
 type layout struct {
-	Root     *placement
-	ByID     map[string]*placement
-	Channels map[string]*channel
-	Width    float64
-	Height   float64
+	Root              *placement
+	ByID              map[string]*placement
+	Channels          map[string]*channel
+	AllocatedCapacity map[string]int
+	Width             float64
+	Height            float64
 }
 
 // measured is the bottom-up size of an element. Container side fields are the
@@ -111,6 +113,10 @@ type measured struct {
 	bottom   float64
 	left     float64
 	label    float64
+	// start/end are main-axis gutters: W/E for an hbox, N/S for a
+	// vbox. They can grow when transparent transit needs more lanes.
+	start float64
+	end   float64
 }
 
 // buildLayout separates bottom-up measurement from top-down placement so child
@@ -123,7 +129,14 @@ func buildLayout(doc *Document, cfg Config, capacity map[string]int, plan *routi
 		return nil, err
 	}
 	m := measureElement(doc.Root, cfg, capacity, plan)
-	result := &layout{ByID: make(map[string]*placement), Channels: make(map[string]*channel)}
+	result := &layout{
+		ByID:              make(map[string]*placement),
+		Channels:          make(map[string]*channel),
+		AllocatedCapacity: make(map[string]int, len(capacity)),
+	}
+	for domain, count := range capacity {
+		result.AllocatedCapacity[domain] = count
+	}
 	rootSlot := rect{X: cfg.CanvasMargin, Y: cfg.CanvasMargin, W: m.w, H: m.h}
 	result.Root = placeElement(m, rootSlot, cfg, result)
 	result.Width = m.w + 2*cfg.CanvasMargin
@@ -226,9 +239,13 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 		m.label = cfg.LineHeight + 2*cfg.GroupLabelPaddingY
 	}
 	for index := 0; index+1 < len(element.Children); index++ {
-		m.gaps = append(m.gaps, seamBand(cfg, plan.SeamTrackCount[seamID(element.ID, index)]))
+		id := seamID(element.ID, index)
+		lanes := plan.SeamTrackCount[id] + capacity[seamChannelID(id)]
+		m.gaps = append(m.gaps, seamBand(cfg, lanes))
 	}
 	if element.Kind == KindHBox {
+		m.start = gutterBand(cfg, capacity[gutterChannelID(element.ID, West)])
+		m.end = gutterBand(cfg, capacity[gutterChannelID(element.ID, East)])
 		m.top = channelBand(cfg, capacity[channelID(element.ID, North)])
 		m.bottom = channelBand(cfg, capacity[channelID(element.ID, South)])
 		maxHeight := 0.0
@@ -242,9 +259,11 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 			m.growY = m.growY || child.growY
 		}
 		m.growX = m.growX || springCount(element) != 0
-		m.w += 2 * cfg.AlongPadding
+		m.w += m.start + m.end
 		m.h = m.top + m.label + maxHeight + m.bottom
 	} else {
+		m.start = gutterBand(cfg, capacity[gutterChannelID(element.ID, North)])
+		m.end = gutterBand(cfg, capacity[gutterChannelID(element.ID, South)])
 		m.left = channelBand(cfg, capacity[channelID(element.ID, West)])
 		m.right = channelBand(cfg, capacity[channelID(element.ID, East)])
 		maxWidth := 0.0
@@ -258,7 +277,7 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 			m.growY = m.growY || child.growY
 		}
 		m.growY = m.growY || springCount(element) != 0
-		m.h += 2*cfg.AlongPadding + m.label
+		m.h += m.start + m.end + m.label
 		m.w = m.left + maxWidth + m.right
 	}
 	// A hierarchy connector allocates tracks across the child container. Reserve
@@ -330,6 +349,11 @@ func seamBand(cfg Config, lanes int) float64 {
 	return math.Max(cfg.ChildGap, needed)
 }
 
+func gutterBand(cfg Config, lanes int) float64 {
+	needed := float64(lanes)*cfg.LaneSpacing + 2*cfg.ChannelPadding
+	return math.Max(cfg.AlongPadding, needed)
+}
+
 // placeElement arranges an element within its assigned slot. Edge springs may
 // make the element's compact routing rectangle smaller than that slot.
 func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement {
@@ -347,7 +371,7 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 		unit, leading, trailing := springAllocation(m, slot.W-m.w)
 		p.Rect.X += leading
 		p.Rect.W -= leading + trailing
-		cursor := p.Rect.X + cfg.AlongPadding
+		cursor := p.Rect.X + m.start
 		contentHeight := slot.H - m.top - m.label - m.bottom
 		if m.label != 0 {
 			p.LabelStrip = rect{
@@ -374,16 +398,16 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 			}
 		}
 		addChannel(result, p, North,
-			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + m.label + m.top/2},
-			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + m.label + m.top/2})
+			point{X: p.Rect.X + m.start/2, Y: slot.Y + m.label + m.top/2},
+			point{X: p.Rect.X + p.Rect.W - m.end/2, Y: slot.Y + m.label + m.top/2})
 		addChannel(result, p, South,
-			point{X: p.Rect.X + cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2},
-			point{X: p.Rect.X + p.Rect.W - cfg.AlongPadding/2, Y: slot.Y + slot.H - m.bottom/2})
+			point{X: p.Rect.X + m.start/2, Y: slot.Y + slot.H - m.bottom/2},
+			point{X: p.Rect.X + p.Rect.W - m.end/2, Y: slot.Y + slot.H - m.bottom/2})
 	} else {
 		unit, leading, trailing := springAllocation(m, slot.H-m.h)
 		p.Rect.Y += leading
 		p.Rect.H -= leading + trailing
-		cursor := p.Rect.Y + cfg.AlongPadding + m.label
+		cursor := p.Rect.Y + m.start + m.label
 		contentWidth := slot.W - m.left - m.right
 		if m.label != 0 {
 			p.LabelStrip = rect{
@@ -410,11 +434,11 @@ func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement
 			}
 		}
 		addChannel(result, p, West,
-			point{X: slot.X + m.left/2, Y: p.Rect.Y + cfg.AlongPadding/2},
-			point{X: slot.X + m.left/2, Y: p.Rect.Y + p.Rect.H - cfg.AlongPadding/2})
+			point{X: slot.X + m.left/2, Y: p.Rect.Y + m.label + m.start/2},
+			point{X: slot.X + m.left/2, Y: p.Rect.Y + p.Rect.H - m.end/2})
 		addChannel(result, p, East,
-			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + cfg.AlongPadding/2},
-			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + p.Rect.H - cfg.AlongPadding/2})
+			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + m.label + m.start/2},
+			point{X: slot.X + slot.W - m.right/2, Y: p.Rect.Y + p.Rect.H - m.end/2})
 	}
 	return p
 }
@@ -434,7 +458,12 @@ func growthUnit(extra float64, weight int) float64 {
 }
 
 func addChannel(result *layout, owner *placement, side Side, a, b point) {
-	c := &channel{ID: channelID(owner.Element.ID, side), A: a, B: b}
+	c := &channel{
+		ID:     channelID(owner.Element.ID, side),
+		Region: routingRegionID(owner.Element),
+		A:      a,
+		B:      b,
+	}
 	owner.Channels[side] = c
 	result.Channels[c.ID] = c
 }

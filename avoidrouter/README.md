@@ -206,6 +206,12 @@ sibling seams come from the topological routing plan. Edges then go in one
 request, with every measured candidate port offered non-exclusively. Boxz adds
 four obstacles framing the canvas, since libavoid will not stay inside it.
 
+The sidecar currently treats only nodes as obstacles. It does not implement the
+built-in router's endpoint-scoped bounded regions: making a whole group a
+libavoid obstacle would also trap edges whose endpoints are inside it. Router
+comparisons involving bounded containers should therefore be read with that
+semantic difference in mind.
+
 ### What the ports actually buy
 
 The pin positions boxz sends look more authoritative than they are. Measured on

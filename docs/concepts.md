@@ -79,6 +79,11 @@ columns, grids, and nested system boundaries. Nodes are the visible,
 connectable leaves. A container title may make a structural box visible, but
 does not turn it into a routing endpoint.
 
+Containers have separate layout and routing roles. Every container composes
+its children, but only a **bounded** container creates a routing region. A
+title makes its container bounded by default; an explicit attribute may bound
+an untitled container or leave a titled layout annotation transparent.
+
 Source order is semantic. It determines sibling order and also provides stable
 tie-breaking when routes compete for equivalent choices. Adding an edge may
 enlarge some routing space; it cannot cause the engine to exchange the
@@ -166,12 +171,28 @@ constructing a road system:
 
 - **Ports** are the legal points where an edge enters or leaves a node.
 - **Seams** are the gaps between consecutive children.
+- **Seam channels** run through those gaps and belong to the parent container.
+- **Edge gutters** provide the corresponding passage before the first child
+  and after the last.
 - **Channels** run along selected sides of a container. An `hbox` owns north
   and south channels; a `vbox` owns west and east channels.
 - **Hierarchy connectors** link a nested container's channels to its parent's
   network.
 - **Sibling crossbars** connect compatible boundary networks across the empty
   gap between adjacent subtrees.
+
+Every channel also belongs to a **routing region**. Structural ownership and
+region ownership are deliberately different: channels introduced by an
+unbounded box remain in its nearest bounded ancestor's region. Its child seam
+channels and edge gutters consequently provide topological passage through
+transparent layout structure. A bounded box instead starts a new region, so
+unrelated routes cannot use the same internal roads.
+
+An edge is allowed in the smallest bounded region containing both endpoints
+and in the nested bounded branches that contain either endpoint. It may
+therefore enter or leave a group it connects to, but cannot cross an unrelated
+group as a shortcut. Parent-owned seam channels remain available immediately
+outside such a group.
 
 These corridors are generated from containment and orientation. The router
 does not construct a general visibility graph over every empty horizontal or
@@ -202,7 +223,8 @@ does not enter the outer routing search.
 
 ### Searched outer routes
 
-All other edges enter the structural channel graph. Candidate endpoint sides
+All other edges enter the structural channel graph, filtered to the routing
+regions legal for that edge. Candidate endpoint sides
 come from the node's immediate parent: children of an `hbox` normally reach
 the outer network through north or south, while children of a `vbox` use west
 or east. Explicit side annotations narrow those choices.
@@ -317,6 +339,9 @@ Boxz instead builds around a set of composable invariants:
 - direct structural neighbors can use their shared seam;
 - routes enter and leave node sides perpendicularly through allocated ports;
 - unrelated routes do not use nodes as transit space;
+- unrelated routes do not use bounded containers as transit space;
+- transparent layout containers remain permeable through child seams and edge
+  gutters;
 - collinear users of shared routing space receive distinct tracks;
 - perpendicular channel crossings remain legal;
 - extra edge capacity grows the smallest responsible layout region; and

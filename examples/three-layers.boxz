@@ -1,0 +1,18 @@
+vbox root {
+  hbox boxA {
+    node a1
+    node a2
+  }
+  hbox boxB [ bounded = true ] {
+    node b1
+    node b2
+  }
+  hbox boxC {
+    node c1
+    node c2
+  }
+}
+
+edges {
+    a1 -> c2
+}

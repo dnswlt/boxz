@@ -48,17 +48,19 @@ The implementation follows those phase boundaries:
 
 An `hbox` lays out children from west to east and owns outer channels on its
 north and south sides. A `vbox` lays out children from north to south and owns
-west and east channels. Nodes are the only connectable elements. Containers
-remain structural, but an explicit title makes a container boundary and label
-visible outside debug output; untitled container rectangles and all routing
-machinery are rendered only when debug output is enabled.
+west and east channels. Nodes are the only connectable elements. Every
+container is structural, while `ContainerAttributes.Bounded` independently
+controls whether it creates a visible boundary and routing region. Parsing
+initializes that property from the presence of a title, then applies an
+explicit `bounded` override. Routing never infers region semantics from title
+text.
 
 Attribute syntax is deliberately generic, but the validated model is not.
 `syntax.go` converts parsed key/value pairs into explicit subject-specific
 fields such as `NodeAttributes.Spring` and
-`ContainerAttributes.LabelAlign`. Unknown names and incompatible value types
-are rejected at that boundary; routing and layout never interpret raw attribute
-strings or generic maps.
+`ContainerAttributes.LabelAlign` and `ContainerAttributes.Bounded`. Unknown
+names and incompatible value types are rejected at that boundary; routing and
+layout never interpret raw attribute strings or generic maps.
 
 There are two ways to choose a route intent:
 
@@ -173,7 +175,8 @@ character-width estimate. Nodes may grow further to fit their anticipated ports.
 Containers reserve three distinct kinds of space:
 
 - child rectangles;
-- seams between consecutive children;
+- seams between consecutive children, including lanes used by their
+  parent-owned seam channels;
 - outer channel bands on the two sides allowed by the container kind.
 
 A titled container additionally reserves a fixed-height label strip at its top.
@@ -200,9 +203,26 @@ margin. See [Springs](springs.md) for the user-facing semantics and examples.
 
 ## Outer-channel graph
 
-`route.go` turns channel center lines and hierarchy risers into a rectilinear
-graph. Every intersection splits both participating segments. Node-side portals
-become graph vertices, so a graph path always starts and ends on legal sides.
+`route.go` turns channel center lines, sibling-seam channels, and hierarchy
+risers into a rectilinear graph. Every intersection splits both participating
+segments. Node-side portals become graph vertices, so a graph path always
+starts and ends on legal sides.
+
+Graph segments carry an effective routing-region ID. A bounded container owns
+its internal segments; segments introduced by an unbounded container belong to
+the nearest bounded ancestor, or to the root canvas when there is none. Before
+Dijkstra search, the endpoints determine the smallest common bounded scope and
+the bounded endpoint branches that may be entered. Edges in other regions are
+filtered from that search.
+
+Every sibling gap also contains a channel owned by the parent. For a `vbox` it
+is horizontal; for an `hbox` it is vertical. Recursively, those same channels
+make unbounded containers permeable through their inter-child gaps. In a
+bounded container they remain private internal routing space. Direct seam
+tracks and searched seam-channel lanes reserve disjoint slots in the same gap.
+Matching channels in the leading and trailing padding provide passage for a
+container with only one child and alternative tracks for larger containers.
+Their padding grows monotonically when several routes need separate lanes.
 
 Container-to-parent transitions have two forms. A transition that continues an
 orthogonal child channel collinearly remains in that channel's track domain, so
@@ -307,8 +327,9 @@ carry `data-domain`.
   used for topology and recursive frontiers.
 - Edge springs align a compact routing rectangle; they do not extend its owned
   channels through empty alignment space.
-- Structural containers are routing topology, not connectable obstacles or
-  endpoints, even when a title makes their boundary visible.
+- Structural containers are never connectable endpoints. Unbounded containers
+  are permeable layout topology; bounded containers are scoped routing regions
+  and obstacles to unrelated routes.
 - Container label height affects layout, but label width and horizontal
   placement never affect measurement or routing.
 - Seam classification depends only on the element tree and explicit side

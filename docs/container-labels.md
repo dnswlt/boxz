@@ -1,7 +1,7 @@
 # Container labels
 
-An explicit title turns an `hbox` or `vbox` into a visible group while leaving
-its routing role unchanged:
+An explicit title gives an `hbox` or `vbox` a label and makes it bounded by
+default:
 
 ```boxz
 vbox system "Order System" {
@@ -12,8 +12,19 @@ vbox system "Order System" {
 }
 ```
 
-Untitled containers remain invisible outside debug output. Container IDs are
-never used as fallback titles.
+Container IDs are never used as fallback titles. Labels and boundaries are
+separate model properties: `[bounded]` makes an untitled container visible,
+while `[bounded = false]` leaves a titled container transparent to routing.
+
+```boxz
+hbox subsystem [bounded] { node api }
+hbox layer "Logical layer" [bounded = false] { node worker }
+```
+
+A bounded container forms a routing region. An edge may enter such a region
+when one of its endpoints is inside, but unrelated edges cannot borrow its
+internal channels as transit space. Label text itself remains display-only and
+never becomes a routing obstacle.
 
 ## Geometry
 
@@ -51,10 +62,10 @@ Alignment uses text-layout words rather than compass directions, hence `left`,
 
 ## Rendering
 
-Titled boundaries are painted behind routes. Label backings and opaque text are
-painted after routes and nodes. The backing starts at 60 percent opacity, so a
-vertical route crossing the strip remains visible even when no conflict-free
-label position exists.
+Bounded container boundaries are painted behind routes. Label backings and
+opaque text are painted after routes and nodes. The backing starts at 60
+percent opacity, so a vertical route crossing the strip remains visible even
+when no conflict-free label position exists.
 
-Containers are still not edge endpoints. A visible group is the existing
-layout container with a boundary and label, not a composite node.
+Containers are still not edge endpoints. A boundary and optional label decorate
+the existing layout container; they do not create a composite node.

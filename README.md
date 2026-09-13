@@ -74,6 +74,6 @@ Render the complete gallery with:
 ## Current scope
 
 Boxz currently has directed edges, conservative single-line node-title
-measurement, titled container boundaries, automatic orthogonal routing, and
-relational spacing. Self-edges, edge labels, multiline titles, styling syntax,
-and connectable containers are not implemented yet.
+measurement, explicit bounded routing regions, automatic orthogonal routing,
+and relational spacing. Self-edges, edge labels, multiline titles, styling
+syntax, and connectable containers are not implemented yet.

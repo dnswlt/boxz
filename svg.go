@@ -215,7 +215,7 @@ func writeGroups(svg *strings.Builder, p *placement) {
 	if p.Element.Kind == KindNode {
 		return
 	}
-	if p.Element.Title != "" {
+	if p.Element.ContainerAttributes.Bounded {
 		fmt.Fprintf(svg, "    <rect class=\"boxz-group-boundary\" data-container=\"%s\" data-kind=\"%s\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"/>\n",
 			html.EscapeString(p.Element.ID), p.Element.Kind,
 			number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))

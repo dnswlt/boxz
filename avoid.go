@@ -65,14 +65,15 @@ func solveWithAvoid(doc *Document, cfg Config, plan *routingPlan) (*layout, *rou
 	}
 
 	routes := &routeResult{
-		Edges:           make([]*routedEdge, len(doc.Edges)),
-		ChannelCapacity: make(map[string]int),
-		LaneByEdge:      make(map[int]map[string]int),
-		ChannelUses:     make(map[string][]int),
-		ResourceUses:    make(map[string][]int),
-		ConnectorUses:   make(map[string][]int),
-		Connectors:      make(map[string]connectorSpec),
-		Domains:         make(map[string]connectorDomain),
+		Edges:            make([]*routedEdge, len(doc.Edges)),
+		ChannelCapacity:  make(map[string]int),
+		LaneByEdge:       make(map[int]map[string]int),
+		ChannelUses:      make(map[string][]int),
+		ChannelLaneCount: make(map[string]int),
+		ResourceUses:     make(map[string][]int),
+		ConnectorUses:    make(map[string][]int),
+		Connectors:       make(map[string]connectorSpec),
+		Domains:          make(map[string]connectorDomain),
 	}
 	ports := make(map[portKey]point)
 	for index, edge := range doc.Edges {
@@ -132,8 +133,9 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 	portSides := make(map[string]Side)
 	portsBySide := make(map[string]map[Side][]string)
 
-	// Only leaf nodes are obstacles. Container boundaries are legal to cross,
-	// and the display pass moves each label clear of the routes.
+	// Only leaf nodes are obstacles. The experimental sidecar cannot express the
+	// built-in router's endpoint-scoped bounded regions, so container boundaries
+	// remain legal to cross here; the display pass moves labels clear of routes.
 	var visit func(*placement)
 	visit = func(p *placement) {
 		if p.Element.Kind == KindNode {

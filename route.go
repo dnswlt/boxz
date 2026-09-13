@@ -17,7 +17,10 @@ type segment struct {
 	// having a graph resource at all.
 	resource string
 	domain   string
-	kind     segmentKind
+	// region is the nearest bounded container that owns this routing space.
+	// The root is the canvas region when it is not itself bounded.
+	region string
+	kind   segmentKind
 }
 
 func (s segment) horizontal() bool { return s.A.Y == s.B.Y }
@@ -36,6 +39,7 @@ type graphEdge struct {
 	dir      direction
 	resource string
 	domain   string
+	region   string
 }
 
 type routeGraph struct {
@@ -117,6 +121,9 @@ type routeResult struct {
 	// display lanes. Movable connectors are allocated separately.
 	LaneByEdge  map[int]map[string]int
 	ChannelUses map[string][]int
+	// ChannelLaneCount includes lanes reserved by prescribed seam routes and
+	// monotone capacity retained from earlier fixed-point iterations.
+	ChannelLaneCount map[string]int
 	// ResourceUses records graph use for congestion diagnostics. ConnectorUses
 	// includes prescribed seam occupancy as well as searched outer routes.
 	ResourceUses  map[string][]int
@@ -137,13 +144,14 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 		return nil, err
 	}
 	result := &routeResult{
-		ChannelCapacity: make(map[string]int),
-		LaneByEdge:      make(map[int]map[string]int),
-		ChannelUses:     make(map[string][]int),
-		ResourceUses:    make(map[string][]int),
-		ConnectorUses:   make(map[string][]int),
-		Connectors:      graph.connectors,
-		Domains:         graph.domains,
+		ChannelCapacity:  make(map[string]int),
+		LaneByEdge:       make(map[int]map[string]int),
+		ChannelUses:      make(map[string][]int),
+		ChannelLaneCount: make(map[string]int),
+		ResourceUses:     make(map[string][]int),
+		ConnectorUses:    make(map[string][]int),
+		Connectors:       graph.connectors,
+		Domains:          graph.domains,
 	}
 	if cfg.Debug {
 		result.Segments = graph.segments
@@ -160,7 +168,9 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 			result.Edges = append(result.Edges, route)
 			continue
 		}
-		route, routeErr := shortestRoute(graph, edge, index, usage)
+		from := l.ByID[edge.From].Element
+		to := l.ByID[edge.To].Element
+		route, routeErr := shortestRoute(graph, edge, index, usage, allowedRoutingRegions(from, to))
 		if routeErr != nil {
 			return nil, routeErr
 		}
@@ -184,13 +194,23 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 			result.ChannelUses[domain] = append(result.ChannelUses[domain], index)
 		}
 	}
+	seamReservations := make(map[string]int, len(plan.SeamTrackCount))
+	for seam, count := range plan.SeamTrackCount {
+		seamReservations[seamChannelID(seam)] = count
+	}
 	for domain, edges := range result.ChannelUses {
 		result.ChannelCapacity[domain] = len(edges)
+		reserved := seamReservations[domain]
+		allocated := l.AllocatedCapacity[domain]
+		if allocated < len(edges) {
+			allocated = len(edges)
+		}
+		result.ChannelLaneCount[domain] = reserved + allocated
 		for lane, edgeIndex := range edges {
 			if result.LaneByEdge[edgeIndex] == nil {
 				result.LaneByEdge[edgeIndex] = make(map[string]int)
 			}
-			result.LaneByEdge[edgeIndex][domain] = lane
+			result.LaneByEdge[edgeIndex][domain] = reserved + lane
 		}
 	}
 	return result, nil
@@ -225,8 +245,9 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, from
 		return nil, fmt.Errorf("boxz: internal routing error: %q is not exposed on side %s", secondNode.ID, secondSide)
 	}
 
-	firstOffset := trackOffset(spec.FirstTrack, spec.TrackCount, cfg.LaneSpacing)
-	secondOffset := trackOffset(spec.SecondTrack, spec.TrackCount, cfg.LaneSpacing)
+	totalTracks := spec.TrackCount + l.AllocatedCapacity[seamChannelID(spec.ID)]
+	firstOffset := trackOffset(spec.FirstTrack, totalTracks, cfg.LaneSpacing)
+	secondOffset := trackOffset(spec.SecondTrack, totalTracks, cfg.LaneSpacing)
 	firstEnd := firstPath.Points[len(firstPath.Points)-1]
 	secondEnd := secondPath.Points[len(secondPath.Points)-1]
 	points := append([]point(nil), firstPath.Points...)
@@ -301,7 +322,11 @@ func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg
 		if domain == "" || !ok {
 			continue
 		}
-		return trackOffset(lane, len(routes.ChannelUses[domain]), cfg.LaneSpacing)
+		count := routes.ChannelLaneCount[domain]
+		if count == 0 {
+			count = len(routes.ChannelUses[domain])
+		}
+		return trackOffset(lane, count, cfg.LaneSpacing)
 	}
 	return 0
 }
@@ -421,8 +446,9 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 	var segments []segment
 	for _, channelName := range sortedChannelIDs(l.Channels) {
 		c := l.Channels[channelName]
-		segments = append(segments, segment{A: c.A, B: c.B, resource: c.ID, domain: c.ID, kind: segmentChannel})
+		segments = append(segments, segment{A: c.A, B: c.B, resource: c.ID, domain: c.ID, region: c.Region, kind: segmentChannel})
 	}
+	addTransitChannels(l.Root, &segments)
 	ports := make(map[string]map[Side]point)
 	connectors := make(map[string]connectorSpec)
 	domains := make(map[string]connectorDomain)
@@ -485,8 +511,8 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 			if s.horizontal() {
 				dir = dirHorizontal
 			}
-			graph.adj[from] = append(graph.adj[from], graphEdge{to: to, length: length, dir: dir, resource: s.resource, domain: s.domain})
-			graph.adj[to] = append(graph.adj[to], graphEdge{to: from, length: length, dir: dir, resource: s.resource, domain: s.domain})
+			graph.adj[from] = append(graph.adj[from], graphEdge{to: to, length: length, dir: dir, resource: s.resource, domain: s.domain, region: s.region})
+			graph.adj[to] = append(graph.adj[to], graphEdge{to: from, length: length, dir: dir, resource: s.resource, domain: s.domain, region: s.region})
 		}
 	}
 	for nodeID, bySide := range ports {
@@ -513,6 +539,114 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 		})
 	}
 	return graph, nil
+}
+
+// addTransitChannels places routable center lines in sibling seams and edge
+// gutters. They belong to the container's effective routing region, so the
+// same geometry is private inside a bounded group and permeable in a
+// transparent layout container.
+func addTransitChannels(parent *placement, segments *[]segment) {
+	if parent.Element.Kind == KindNode {
+		return
+	}
+	region := routingRegionID(parent.Element)
+	if parent.Element.Kind == KindHBox {
+		for _, side := range []Side{West, East} {
+			x := parent.Channels[North].A.X
+			if side == East {
+				x = parent.Channels[North].B.X
+			}
+			id := gutterChannelID(parent.Element.ID, side)
+			*segments = append(*segments, segment{
+				A:        point{X: x, Y: parent.Channels[North].A.Y},
+				B:        point{X: x, Y: parent.Channels[South].A.Y},
+				resource: id, domain: id, region: region, kind: segmentChannel,
+			})
+		}
+	} else {
+		for _, side := range []Side{North, South} {
+			y := parent.Channels[West].A.Y
+			if side == South {
+				y = parent.Channels[West].B.Y
+			}
+			id := gutterChannelID(parent.Element.ID, side)
+			*segments = append(*segments, segment{
+				A:        point{X: parent.Channels[West].A.X, Y: y},
+				B:        point{X: parent.Channels[East].A.X, Y: y},
+				resource: id, domain: id, region: region, kind: segmentChannel,
+			})
+		}
+	}
+	for index := 0; index+1 < len(parent.Children); index++ {
+		first, second := parent.Children[index], parent.Children[index+1]
+		id := seamChannelID(seamID(parent.Element.ID, index))
+		var a, b point
+		if parent.Element.Kind == KindHBox {
+			x := (first.Rect.X + first.Rect.W + second.Rect.X) / 2
+			a = point{X: x, Y: parent.Channels[North].A.Y}
+			b = point{X: x, Y: parent.Channels[South].A.Y}
+		} else {
+			y := (first.Rect.Y + first.Rect.H + second.Rect.Y) / 2
+			a = point{X: parent.Channels[West].A.X, Y: y}
+			b = point{X: parent.Channels[East].A.X, Y: y}
+		}
+		*segments = append(*segments, segment{
+			A: a, B: b, resource: id, domain: id, region: region,
+			kind: segmentChannel,
+		})
+	}
+	for _, child := range parent.Children {
+		addTransitChannels(child, segments)
+	}
+}
+
+// routingRegionID separates geometric ownership from routing ownership. An
+// unbounded layout box contributes roads to its nearest bounded ancestor; when
+// no such ancestor exists, the root element names the canvas region.
+func routingRegionID(element *Element) string {
+	var root *Element
+	for current := element; current != nil; current = current.Parent {
+		root = current
+		if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+			return current.ID
+		}
+	}
+	if root == nil {
+		return ""
+	}
+	return root.ID
+}
+
+// allowedRoutingRegions returns the bounded endpoint branches plus their
+// smallest common bounded region. This lets an edge leave or enter a group it
+// is incident to, but prevents unrelated routes from borrowing that group's
+// internal channels. With no common bounded ancestor, the root canvas is the
+// common region.
+func allowedRoutingRegions(from, to *Element) map[string]bool {
+	allowed := make(map[string]bool)
+	lca := lowestCommonAncestor(from, to)
+	if lca == nil {
+		return allowed
+	}
+	scope := lca
+	for current := lca; current != nil; current = current.Parent {
+		scope = current
+		if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+			break
+		}
+	}
+	allowed[routingRegionID(scope)] = true
+	for _, endpoint := range []*Element{from, to} {
+		for current := endpoint.Parent; current != nil; current = current.Parent {
+			if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+				allowed[current.ID] = true
+			}
+			if current == scope {
+				break
+			}
+		}
+	}
+	return allowed
 }
 
 // boundaryAccess describes the routable portion of one container side. A
@@ -561,6 +695,7 @@ func addSiblingCrossbars(parent *placement, baseSegments []segment, segments *[]
 				B:        b,
 				resource: id,
 				domain:   domainID,
+				region:   routingRegionID(parent.Element),
 				kind:     segmentCrossbar,
 			})
 			low, high := coordinate, coordinate
@@ -669,6 +804,12 @@ func crossbarID(parentID string, firstChild, index int) string {
 
 func seamConnectorDomainID(seamID string) string { return seamID + ":connector" }
 
+func seamChannelID(seamID string) string { return seamID + ":channel" }
+
+func gutterChannelID(ownerID string, side Side) string {
+	return fmt.Sprintf("%s:gutter:%s", ownerID, side)
+}
+
 func mergeConnectorDomain(domains map[string]connectorDomain, candidate connectorDomain) {
 	if existing, ok := domains[candidate.ID]; ok {
 		candidate.Low = math.Min(existing.Low, candidate.Low)
@@ -694,7 +835,7 @@ func addHierarchySegments(parent *placement, segments *[]segment, ports map[stri
 				for portalIndex, portal := range portals {
 					destination := point{X: portal.X, Y: parentChannel.A.Y}
 					resource, domain := hierarchyRiserResource(child, parentChannel, side, portalIndex, portal, connectors, domains)
-					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, kind: segmentRiser})
+					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.Element), kind: segmentRiser})
 					if child.Element.Kind == KindNode {
 						setPort(ports, child.Element.ID, side, portal.point)
 					}
@@ -707,7 +848,7 @@ func addHierarchySegments(parent *placement, segments *[]segment, ports map[stri
 				for portalIndex, portal := range portals {
 					destination := point{X: parentChannel.A.X, Y: portal.Y}
 					resource, domain := hierarchyRiserResource(child, parentChannel, side, portalIndex, portal, connectors, domains)
-					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, kind: segmentRiser})
+					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.Element), kind: segmentRiser})
 					if child.Element.Kind == KindNode {
 						setPort(ports, child.Element.ID, side, portal.point)
 					}
@@ -957,7 +1098,7 @@ func (q *routeQueue) Pop() any {
 
 // shortestRoute searches every legal source side; each search may terminate on
 // any legal destination side.
-func shortestRoute(graph *routeGraph, edge *Edge, edgeIndex int, usage map[string]int) (*routedEdge, error) {
+func shortestRoute(graph *routeGraph, edge *Edge, edgeIndex int, usage map[string]int, allowedRegions map[string]bool) (*routedEdge, error) {
 	fromSides := endpointSides(graph, edge.From, edge.FromSide)
 	toSides := endpointSides(graph, edge.To, edge.ToSide)
 	if len(fromSides) == 0 || len(toSides) == 0 {
@@ -969,7 +1110,7 @@ func shortestRoute(graph *routeGraph, edge *Edge, edgeIndex int, usage map[strin
 	var best *routedEdge
 	var bestCost routeCost
 	for _, fromSide := range fromSides {
-		candidate, cost, ok := dijkstra(graph, graph.ports[edge.From][fromSide], edge.To, toSides, usage)
+		candidate, cost, ok := dijkstra(graph, graph.ports[edge.From][fromSide], edge.To, toSides, usage, allowedRegions)
 		if !ok {
 			continue
 		}
@@ -1005,7 +1146,7 @@ func endpointSides(graph *routeGraph, nodeID string, constrained *Side) []Side {
 
 // dijkstra finds the lexicographically cheapest path from start to any target
 // side while retaining incoming direction as part of the state.
-func dijkstra(graph *routeGraph, start int, targetNode string, targetSides []Side, usage map[string]int) (*routedEdge, routeCost, bool) {
+func dijkstra(graph *routeGraph, start int, targetNode string, targetSides []Side, usage map[string]int, allowedRegions map[string]bool) (*routedEdge, routeCost, bool) {
 	targetByVertex := make(map[int]Side)
 	for _, side := range targetSides {
 		targetByVertex[graph.ports[targetNode][side]] = side
@@ -1034,6 +1175,9 @@ func dijkstra(graph *routeGraph, start int, targetNode string, targetSides []Sid
 			break
 		}
 		for _, next := range graph.adj[item.state.vertex] {
+			if !allowedRegions[next.region] {
+				continue
+			}
 			cost := item.cost
 			cost.distance += next.length
 			if item.state.dir != dirNone && item.state.dir != next.dir {

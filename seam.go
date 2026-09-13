@@ -51,11 +51,16 @@ func assignSeamTracks(doc *Document, l *layout, plan *routingPlan, ports map[por
 		pins := groups[seamID]
 		order, acyclic := seamTrackOrder(pins)
 		if acyclic {
+			// Seam capacity is monotone across layout iterations. Keep using the
+			// retained bank even if changed geometry makes a formerly cyclic seam
+			// acyclic; searched seam-channel lanes are reserved after this bank.
+			trackCount := plan.SeamTrackCount[seamID]
+			firstTrack := (trackCount - len(pins)) / 2
 			for track, pinIndex := range order {
 				spec := pins[pinIndex].spec
-				spec.FirstTrack = track
-				spec.SecondTrack = track
-				spec.TrackCount = len(pins)
+				spec.FirstTrack = firstTrack + track
+				spec.SecondTrack = firstTrack + track
+				spec.TrackCount = trackCount
 				spec.DoglegCoordinate = 0
 			}
 			continue

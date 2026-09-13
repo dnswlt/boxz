@@ -16,8 +16,10 @@ node api "API Server"
 
 An `hbox` arranges its contents from west to east. A `vbox` arranges them from
 north to south. Containers must contain at least one actual element and may be
-nested freely. An optional quoted title makes the container boundary and its
-top-aligned label visible; an untitled container remains structural and is
+nested freely. An optional quoted title adds a top-aligned label and makes the
+container bounded by default. A bounded container has a visible boundary and
+forms a routing region; unrelated edges cannot use channels inside it. An
+untitled, unbounded container remains transparent layout structure and is
 visible only in debug output.
 
 ```boxz
@@ -75,6 +77,7 @@ identifier values so future attributes can use appropriate types.
 node worker "Worker" [spring]
 node cache "Cache" [spring = true,]
 hbox workers "Workers" [labelAlign = center] { node worker }
+hbox subsystem [bounded] { node cache }
 ```
 
 The defined attributes are:
@@ -86,6 +89,10 @@ The defined attributes are:
   `right`. Omission is equivalent to `auto`. It is an error to put
   `labelAlign` on an untitled container. See
   [Container labels](container-labels.md).
+- `bounded` on a container accepts a bare flag, `true`, or `false`. A title
+  implies `bounded = true`; an explicit value overrides that default. Bounded
+  containers are drawn and create routing regions even when they have no
+  title.
 
 Unsupported attributes and incompatible values are errors.
 
