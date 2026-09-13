@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/dnswlt/boxz"
+	"github.com/dnswlt/boxz/internal/renderconfig"
 )
 
 func main() {
@@ -52,13 +53,13 @@ func run() int {
 		defer file.Close()
 		output = file
 	}
-	cfg := boxz.DefaultConfig()
+	cfg := renderconfig.Default()
 	cfg.Debug = *debug
 	switch *router {
 	case "builtin":
-		cfg.EdgeRouter = boxz.RouterBuiltin
+		cfg.EdgeRouter = renderconfig.RouterBuiltin
 	case "avoid":
-		cfg.EdgeRouter = boxz.RouterAvoid
+		cfg.EdgeRouter = renderconfig.RouterAvoid
 	default:
 		fmt.Fprintf(os.Stderr, "boxz: unknown router %q; want builtin or avoid\n", *router)
 		return 2

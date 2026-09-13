@@ -19,11 +19,11 @@ hbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := doc.Root.Children[0].Children[0]
-	b := doc.Root.Children[0].Children[1]
-	c := doc.Root.Children[1]
+	a := doc.root.Children[0].Children[0]
+	b := doc.root.Children[0].Children[1]
+	c := doc.root.Children[1]
 	checks := []struct {
-		node *Element
+		node *element
 		side Side
 		want bool
 	}{
@@ -33,7 +33,7 @@ hbox root {
 		{c, East, true}, {a, East, false}, {b, East, false},
 	}
 	for _, check := range checks {
-		if got := onFrontier(doc.Root, check.node, check.side); got != check.want {
+		if got := onFrontier(doc.root, check.node, check.side); got != check.want {
 			t.Errorf("onFrontier(root, %s, %s) = %v, want %v", check.node.ID, check.side, got, check.want)
 		}
 	}
@@ -71,7 +71,7 @@ edges { b -> e }
 		t.Fatalf("b -> e seam = %#v, want nested root S/N seam", seam)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())

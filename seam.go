@@ -27,9 +27,9 @@ type connectorUse struct {
 // assignSeamTracks solves each sibling seam as an independent channel-routing
 // problem. A first-side access leg aligned with a second-side leg must use an
 // earlier track, otherwise the two perpendicular legs overlap between tracks.
-func assignSeamTracks(doc *Document, l *layout, plan *routingPlan, ports map[portKey]point, cfg Config) (bool, error) {
+func assignSeamTracks(doc *Document, l *layout, plan *routingPlan, ports map[portKey]point, cfg config) (bool, error) {
 	groups := make(map[string][]seamPins)
-	for edgeIndex, edge := range doc.Edges {
+	for edgeIndex, edge := range doc.edges {
 		spec := plan.Seams[edgeIndex]
 		if spec == nil {
 			continue
@@ -95,7 +95,7 @@ func assignSeamTracks(doc *Document, l *layout, plan *routingPlan, ports map[por
 // domain together. Prescribed seam uses are considered first, preserving their
 // straight coordinate when possible; searched routes move locally around them.
 // It returns hierarchy-domain capacity for the layout fixed point.
-func assignConnectorTracks(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg Config) map[string]int {
+func assignConnectorTracks(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg config) map[string]int {
 	groups := collectConnectorUses(routes, plan, ports, cfg)
 	routes.ConnectorUses = make(map[string][]int)
 	capacity := make(map[string]int)
@@ -123,7 +123,7 @@ func assignConnectorTracks(routes *routeResult, plan *routingPlan, ports map[por
 			assigned[use.route][use.first] = use.coordinate
 			routes.ConnectorUses[domainID] = append(routes.ConnectorUses[domainID], use.route.EdgeIndex)
 		}
-		if uses[0].domain.Kind == connectorHierarchy {
+		if uses[0].domain.kind == connectorHierarchy {
 			capacity[domainID] = len(uses)
 		}
 	}
@@ -164,7 +164,7 @@ func allocateConnectorCoordinate(preferred, low, high float64, chosen []float64,
 	return preferred
 }
 
-func collectConnectorUses(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg Config) map[string][]*connectorUse {
+func collectConnectorUses(routes *routeResult, plan *routingPlan, ports map[portKey]point, cfg config) map[string][]*connectorUse {
 	groups := make(map[string][]*connectorUse)
 	for _, route := range routes.Edges {
 		for first := 0; first < len(route.Domains); {
@@ -202,7 +202,7 @@ func collectConnectorUses(routes *routeResult, plan *routingPlan, ports map[port
 // physicalRunCoordinate predicts the final coordinate of the straight run
 // containing segmentIndex. Endpoint ports override lane offsets in displayRoute,
 // so endpoint-adjacent crossbars must use those exact coordinates too.
-func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeResult, ports map[portKey]point, cfg Config) float64 {
+func physicalRunCoordinate(route *routedEdge, segmentIndex int, routes *routeResult, ports map[portKey]point, cfg config) float64 {
 	horizontal := route.Points[segmentIndex].Y == route.Points[segmentIndex+1].Y
 	first, last := segmentIndex, segmentIndex
 	for first > 0 && (route.Points[first-1].Y == route.Points[first].Y) == horizontal {
@@ -303,10 +303,10 @@ func physicalSeamPins(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, port
 
 	firstChild := parent.Children[spec.FirstChild]
 	first, second := from, to
-	if !containsElement(firstChild.Element, l.ByID[edge.From].Element) {
+	if !containsElement(firstChild.element, l.ByID[edge.From].element) {
 		first, second = to, from
 	}
-	if parent.Element.Kind == KindVBox {
+	if parent.element.kind == kindVBox {
 		return first.X, second.X, nil
 	}
 	return first.Y, second.Y, nil
@@ -352,11 +352,11 @@ func seamTrackOrder(pins []seamPins) ([]int, bool) {
 	return order, true
 }
 
-func doglegCoordinates(parent *placement, count int, pins []seamPins, cfg Config) []float64 {
+func doglegCoordinates(parent *placement, count int, pins []seamPins, cfg config) []float64 {
 	first := parent.Children[pins[0].spec.FirstChild]
 	second := parent.Children[pins[0].spec.FirstChild+1]
 	var low, high float64
-	if parent.Element.Kind == KindVBox {
+	if parent.element.kind == kindVBox {
 		low = math.Min(first.Rect.X, second.Rect.X)
 		high = math.Max(first.Rect.X+first.Rect.W, second.Rect.X+second.Rect.W)
 	} else {

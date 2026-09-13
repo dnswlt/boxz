@@ -10,13 +10,13 @@ import (
 )
 
 // avoidConfig skips when the optional sidecar has not been built.
-func avoidConfig(t *testing.T) Config {
+func avoidConfig(t *testing.T) config {
 	t.Helper()
 	if _, err := avoid.FindBinary(); err != nil {
 		t.Skipf("skipping: %v", err)
 	}
-	cfg := DefaultConfig()
-	cfg.EdgeRouter = RouterAvoid
+	cfg := defaultConfig()
+	cfg.EdgeRouter = routerAvoid
 	return cfg
 }
 
@@ -122,7 +122,7 @@ func TestAvoidPreservesNodePlacement(t *testing.T) {
 	}
 	for _, filename := range filenames {
 		doc := parseFile(t, filename)
-		builtin, _, _, err := solve(doc, DefaultConfig())
+		builtin, _, _, err := solve(doc, defaultConfig())
 		if err != nil {
 			t.Fatalf("%s: %v", filename, err)
 		}
@@ -131,7 +131,7 @@ func TestAvoidPreservesNodePlacement(t *testing.T) {
 			t.Fatalf("%s: %v", filename, err)
 		}
 		for id, placed := range routed.ByID {
-			if placed.Element.Kind != KindNode {
+			if placed.element.kind != kindNode {
 				continue
 			}
 			other := builtin.ByID[id]

@@ -3,7 +3,6 @@ package boxz
 import (
 	"fmt"
 	"strconv"
-	"unicode"
 )
 
 // seamSpec identifies the boundary between two adjacent children of a
@@ -43,10 +42,10 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 		PortCount:      make(map[string]map[Side]int),
 		OuterDegree:    make(map[string]int),
 	}
-	nodes := make(map[string]*Element)
-	collectNodes(doc.Root, nodes)
+	nodes := make(map[string]*element)
+	collectNodes(doc.root, nodes)
 
-	for edgeIndex, edge := range doc.Edges {
+	for edgeIndex, edge := range doc.edges {
 		spec := classifySeam(nodes[edge.From], nodes[edge.To])
 		if spec != nil && constraintsAllowSeam(edge, spec) {
 			spec.FirstTrack = plan.SeamTrackCount[spec.ID]
@@ -58,10 +57,10 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 			continue
 		}
 
-		if err := validateChannelConstraint(edge, nodes[edge.From], edge.FromSide); err != nil {
+		if err := validateChannelConstraint(edgeIndex, edge, nodes[edge.From], edge.FromSide); err != nil {
 			return nil, err
 		}
-		if err := validateChannelConstraint(edge, nodes[edge.To], edge.ToSide); err != nil {
+		if err := validateChannelConstraint(edgeIndex, edge, nodes[edge.To], edge.ToSide); err != nil {
 			return nil, err
 		}
 		plan.OuterDegree[edge.From]++
@@ -75,12 +74,12 @@ func buildRoutingPlan(doc *Document) (*routingPlan, error) {
 
 // classifySeam returns a direct sibling-seam route when both endpoints are on
 // the required recursive frontiers.
-func classifySeam(from, to *Element) *seamSpec {
+func classifySeam(from, to *element) *seamSpec {
 	if from == nil || to == nil || from == to {
 		return nil
 	}
 	lca := lowestCommonAncestor(from, to)
-	if lca == nil || lca.Kind == KindNode {
+	if lca == nil || lca.kind == kindNode {
 		return nil
 	}
 	fromChild := childBelow(lca, from)
@@ -98,7 +97,7 @@ func classifySeam(from, to *Element) *seamSpec {
 		firstIndex = toIndex
 	}
 	spec := &seamSpec{ID: seamID(lca.ID, firstIndex), ParentID: lca.ID, FirstChild: firstIndex}
-	if lca.Kind == KindVBox {
+	if lca.kind == kindVBox {
 		if fromIndex < toIndex {
 			spec.FromSide, spec.ToSide = South, North
 		} else {
@@ -121,17 +120,17 @@ func classifySeam(from, to *Element) *seamSpec {
 
 // onFrontier reports whether node is exposed on one side of root according to
 // container order alone; it deliberately performs no geometric visibility test.
-func onFrontier(root, node *Element, side Side) bool {
+func onFrontier(root, node *element, side Side) bool {
 	if root == node {
-		return root.Kind == KindNode
+		return root.kind == kindNode
 	}
-	if root.Kind == KindNode || !containsElement(root, node) {
+	if root.kind == kindNode || !containsElement(root, node) {
 		return false
 	}
 
 	// Along a container's stacking axis only the first or last child is exposed.
 	// Perpendicular to that axis, every child's matching frontier is exposed.
-	if root.Kind == KindHBox {
+	if root.kind == kindHBox {
 		switch side {
 		case West:
 			return onFrontier(root.Children[0], node, side)
@@ -161,8 +160,8 @@ func onFrontier(root, node *Element, side Side) bool {
 	return false
 }
 
-func lowestCommonAncestor(left, right *Element) *Element {
-	ancestors := make(map[*Element]bool)
+func lowestCommonAncestor(left, right *element) *element {
+	ancestors := make(map[*element]bool)
 	for current := left; current != nil; current = current.Parent {
 		ancestors[current] = true
 	}
@@ -174,7 +173,7 @@ func lowestCommonAncestor(left, right *Element) *Element {
 	return nil
 }
 
-func childBelow(ancestor, descendant *Element) *Element {
+func childBelow(ancestor, descendant *element) *element {
 	current := descendant
 	for current != nil && current.Parent != ancestor {
 		current = current.Parent
@@ -182,7 +181,7 @@ func childBelow(ancestor, descendant *Element) *Element {
 	return current
 }
 
-func childIndex(parent, child *Element) int {
+func childIndex(parent, child *element) int {
 	for index, candidate := range parent.Children {
 		if candidate == child {
 			return index
@@ -191,7 +190,7 @@ func childIndex(parent, child *Element) int {
 	return -1
 }
 
-func containsElement(root, target *Element) bool {
+func containsElement(root, target *element) bool {
 	for current := target; current != nil; current = current.Parent {
 		if current == root {
 			return true
@@ -205,7 +204,7 @@ func constraintsAllowSeam(edge *Edge, spec *seamSpec) bool {
 		(edge.ToSide == nil || *edge.ToSide == spec.ToSide)
 }
 
-func validateChannelConstraint(edge *Edge, node *Element, side *Side) error {
+func validateChannelConstraint(edgeIndex int, edge *Edge, node *element, side *Side) error {
 	if side == nil || node.Parent == nil {
 		return nil
 	}
@@ -213,8 +212,16 @@ func validateChannelConstraint(edge *Edge, node *Element, side *Side) error {
 	if *side == allowed[0] || *side == allowed[1] {
 		return nil
 	}
-	return diagnostic(edge.position.Filename, edge.position,
-		"side %s is not available for edge %s -> %s", *side, edge.From, edge.To)
+	if edge.position.Line > 0 {
+		return diagnostic(edge.position.Filename, edge.position,
+			"side %s is not available for edge %s -> %s", *side, edge.From, edge.To)
+	}
+	filename := edge.position.Filename
+	if filename == "" {
+		filename = "boxz"
+	}
+	return fmt.Errorf("%s: edge %d side %s is not available for %s -> %s",
+		filename, edgeIndex+1, *side, edge.From, edge.To)
 }
 
 func incrementPort(counts map[string]map[Side]int, nodeID string, side Side) {
@@ -239,10 +246,8 @@ func absInt(value int) int {
 // identifiers pass through; any other ID is quoted, so it cannot equal a plain
 // one and ends unambiguously at its closing quote.
 func keyPart(id string) string {
-	for index, r := range id {
-		if r != '_' && !unicode.IsLetter(r) && (index == 0 || !unicode.IsDigit(r)) {
-			return strconv.Quote(id)
-		}
+	if !isPlainIdentifier(id) {
+		return strconv.Quote(id)
 	}
 	return id
 }

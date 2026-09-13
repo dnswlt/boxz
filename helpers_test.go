@@ -82,13 +82,13 @@ func assertNoNodeRectOverlaps(t *testing.T, l *layout) {
 		for right := left + 1; right < len(nodes); right++ {
 			if rectInteriorsOverlap(nodes[left].Rect, nodes[right].Rect) {
 				t.Fatalf("nodes %q and %q overlap: %#v and %#v",
-					nodes[left].Element.ID, nodes[right].Element.ID, nodes[left].Rect, nodes[right].Rect)
+					nodes[left].element.ID, nodes[right].element.ID, nodes[left].Rect, nodes[right].Rect)
 			}
 		}
 	}
 }
 
-func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg Config) {
+func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg config) {
 	t.Helper()
 	var nodes []*placement
 	collectNodePlacements(l.Root, &nodes)
@@ -96,19 +96,19 @@ func assertRoutesAvoidOtherNodes(t *testing.T, l *layout, routes *routeResult, p
 		points := displayRoute(route, routes, ports, cfg)
 		for index := 1; index < len(points); index++ {
 			for _, node := range nodes {
-				if node.Element.ID == route.From || node.Element.ID == route.To {
+				if node.element.ID == route.From || node.element.ID == route.To {
 					continue
 				}
 				if segmentEntersRectInterior(points[index-1], points[index], node.Rect) {
 					t.Fatalf("route %s -> %s segment %#v -> %#v enters node %q at %#v",
-						route.From, route.To, points[index-1], points[index], node.Element.ID, node.Rect)
+						route.From, route.To, points[index-1], points[index], node.element.ID, node.Rect)
 				}
 			}
 		}
 	}
 }
 
-func assertRoutesMeetPortsCleanly(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg Config) {
+func assertRoutesMeetPortsCleanly(t *testing.T, l *layout, routes *routeResult, ports map[portKey]point, cfg config) {
 	t.Helper()
 	for _, route := range routes.Edges {
 		points := displayRoute(route, routes, ports, cfg)
@@ -133,7 +133,7 @@ func assertRoutesMeetPortsCleanly(t *testing.T, l *layout, routes *routeResult, 
 	}
 }
 
-func assertNoDisplayRouteOverlaps(t *testing.T, routes *routeResult, ports map[portKey]point, cfg Config, tolerance float64) {
+func assertNoDisplayRouteOverlaps(t *testing.T, routes *routeResult, ports map[portKey]point, cfg config, tolerance float64) {
 	t.Helper()
 	display := make([][]point, len(routes.Edges))
 	for index, route := range routes.Edges {
@@ -163,7 +163,7 @@ func endpointSegmentIsPerpendicular(port, outside point, node rect, side Side) b
 }
 
 func collectNodePlacements(p *placement, nodes *[]*placement) {
-	if p.Element.Kind == KindNode {
+	if p.element.kind == kindNode {
 		*nodes = append(*nodes, p)
 		return
 	}

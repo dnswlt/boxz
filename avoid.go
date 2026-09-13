@@ -11,24 +11,12 @@ import (
 	"github.com/dnswlt/boxz/internal/avoid"
 )
 
-// RouterKind selects which implementation turns placed boxes into edge
-// polylines.
-type RouterKind string
-
-const (
-	// RouterBuiltin is the structural router in route.go and seam.go.
-	RouterBuiltin RouterKind = ""
-	// RouterAvoid delegates routing to the boxz-avoid sidecar process. It is
-	// experimental: see avoidrouter/README.md.
-	RouterAvoid RouterKind = "avoid"
-)
-
 const defaultAvoidTimeout = 30 * time.Second
 
 // solveWithAvoid replaces every routing phase after placement. Layout runs
 // once: the fixed point in solve only grows outer channel bands for boxz's own
 // lane model, and libavoid does not route in channels.
-func solveWithAvoid(doc *Document, cfg Config, plan *routingPlan) (*layout, *routeResult, map[portKey]point, error) {
+func solveWithAvoid(doc *Document, cfg config, plan *routingPlan) (*layout, *routeResult, map[portKey]point, error) {
 	l, err := buildLayout(doc, cfg, map[string]int{}, plan)
 	if err != nil {
 		return nil, nil, nil, err
@@ -59,13 +47,13 @@ func solveWithAvoid(doc *Document, cfg Config, plan *routingPlan) (*layout, *rou
 	for _, warning := range response.Warnings {
 		fmt.Fprintf(os.Stderr, "boxz: avoid router: %s\n", warning)
 	}
-	if len(response.Routes) != len(doc.Edges) {
+	if len(response.Routes) != len(doc.edges) {
 		return nil, nil, nil, fmt.Errorf("boxz: avoid router returned %d routes for %d edges",
-			len(response.Routes), len(doc.Edges))
+			len(response.Routes), len(doc.edges))
 	}
 
 	routes := &routeResult{
-		Edges:            make([]*routedEdge, len(doc.Edges)),
+		Edges:            make([]*routedEdge, len(doc.edges)),
 		ChannelCapacity:  make(map[string]int),
 		LaneByEdge:       make(map[int]map[string]int),
 		ChannelUses:      make(map[string][]int),
@@ -76,7 +64,7 @@ func solveWithAvoid(doc *Document, cfg Config, plan *routingPlan) (*layout, *rou
 		Domains:          make(map[string]connectorDomain),
 	}
 	ports := make(map[portKey]point)
-	for index, edge := range doc.Edges {
+	for index, edge := range doc.edges {
 		chosen := response.Routes[index]
 		if len(chosen.Points) < 2 {
 			return nil, nil, nil, fmt.Errorf("boxz: avoid router returned no path for %s -> %s",
@@ -111,7 +99,7 @@ func avoidPoints(in []avoid.Point) []point {
 	return out
 }
 
-func avoidOptions(cfg Config) *avoid.Options {
+func avoidOptions(cfg config) *avoid.Options {
 	options := &avoid.Options{}
 	if cfg.LaneSpacing > 0 {
 		lane := cfg.LaneSpacing
@@ -127,7 +115,7 @@ func avoidOptions(cfg Config) *avoid.Options {
 // buildAvoidRequest turns placed geometry into obstacles and candidate ports,
 // returning the boxz side of each port so the response maps back. Ports are
 // hints that pick a side; libavoid owns the endpoint. See avoidrouter/README.md.
-func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) (*avoid.Request, map[string]Side, error) {
+func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg config) (*avoid.Request, map[string]Side, error) {
 	request := &avoid.Request{ID: "boxz", Options: avoidOptions(cfg)}
 	shared := false
 	portSides := make(map[string]Side)
@@ -138,14 +126,14 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 	// remain legal to cross here; the display pass moves labels clear of routes.
 	var visit func(*placement)
 	visit = func(p *placement) {
-		if p.Element.Kind == KindNode {
-			obstacle := avoid.Obstacle{ID: keyPart(p.Element.ID), Rect: avoidRect(p.Rect), ExclusivePorts: &shared}
+		if p.element.kind == kindNode {
+			obstacle := avoid.Obstacle{ID: keyPart(p.element.ID), Rect: avoidRect(p.Rect), ExclusivePorts: &shared}
 			sides := make(map[Side][]string)
 			for _, side := range []Side{North, East, South, West} {
-				count := plan.PortCount[p.Element.ID][side]
-				for _, allowed := range allowedSides(p.Element) {
+				count := plan.PortCount[p.element.ID][side]
+				for _, allowed := range allowedSides(p.element) {
 					if allowed == side {
-						count += plan.OuterDegree[p.Element.ID]
+						count += plan.OuterDegree[p.element.ID]
 					}
 				}
 				// One pin per anticipated edge. libavoid need not use these
@@ -161,7 +149,7 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 					sides[side] = append(sides[side], id)
 				}
 			}
-			portsBySide[p.Element.ID] = sides
+			portsBySide[p.element.ID] = sides
 			request.Obstacles = append(request.Obstacles, obstacle)
 			return
 		}
@@ -175,7 +163,7 @@ func buildAvoidRequest(doc *Document, l *layout, plan *routingPlan, cfg Config) 
 	// cfg.CanvasMargin inside the canvas, leaving the frame free for routing.
 	request.Obstacles = append(request.Obstacles, canvasFrame(l)...)
 
-	for index, edge := range doc.Edges {
+	for index, edge := range doc.edges {
 		from, err := avoidEndpoint(edge.From, edge.FromSide, portsBySide)
 		if err != nil {
 			return nil, nil, err

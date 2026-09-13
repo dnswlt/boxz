@@ -116,6 +116,10 @@ Go-style line and block comments are accepted:
 node api /* an inline block comment */
 ```
 
+The parser accepts comments, but canonical formatting does not preserve them.
+`Format` retains semantic element, spring, and edge order while normalizing
+whitespace, quoting, attributes, and optional defaults.
+
 ## Grammar
 
 ```text

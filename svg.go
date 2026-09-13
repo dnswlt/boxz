@@ -9,11 +9,24 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/dnswlt/boxz/internal/renderconfig"
 )
 
-// RenderSVG lays out and renders a parsed document as a standalone SVG. Set
-// cfg.Debug to include structural and routing diagnostics.
-func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
+// RenderSVG lays out and renders a document as a standalone SVG. Its variadic
+// configuration is reserved for the bundled command and internal tests;
+// external callers omit it and receive the stable default rendering behavior.
+func RenderSVG(w io.Writer, doc *Document, configs ...renderconfig.Config) error {
+	if err := doc.checkInitialized(); err != nil {
+		return err
+	}
+	if len(configs) > 1 {
+		return fmt.Errorf("boxz: RenderSVG accepts at most one configuration")
+	}
+	cfg := defaultConfig()
+	if len(configs) == 1 {
+		cfg = configs[0]
+	}
 	l, routes, ports, err := solve(doc, cfg)
 	if err != nil {
 		return err
@@ -60,7 +73,7 @@ func RenderSVG(w io.Writer, doc *Document, cfg Config) error {
 	svg.WriteString("  </g>\n")
 	svg.WriteString("  <g class=\"boxz-edges\">\n")
 	for index, route := range routes.Edges {
-		edge := doc.Edges[route.EdgeIndex]
+		edge := doc.edges[route.EdgeIndex]
 		fmt.Fprintf(&svg, "    <path class=\"boxz-edge\" data-from=\"%s\" data-to=\"%s\" d=\"%s\"/>\n",
 			html.EscapeString(edge.From), html.EscapeString(edge.To), svgPath(displayRoutes[index]))
 	}
@@ -89,20 +102,20 @@ type groupLabel struct {
 
 // placeGroupLabels is a post-routing display pass. Labels reserve vertical
 // space during layout but never become obstacles or influence route selection.
-func placeGroupLabels(root *placement, routes [][]point, cfg Config) []groupLabel {
+func placeGroupLabels(root *placement, routes [][]point, cfg config) []groupLabel {
 	var labels []groupLabel
 	var visit func(*placement)
 	visit = func(p *placement) {
-		if p.Element.Kind != KindNode && p.Element.Title != "" {
+		if p.element.kind != kindNode && p.element.Title != "" {
 			strip := p.LabelStrip
-			desired := float64(utf8.RuneCountInString(p.Element.Title))*cfg.CharacterWidth + 2*cfg.GroupLabelPaddingX
+			desired := float64(utf8.RuneCountInString(p.element.Title))*cfg.CharacterWidth + 2*cfg.GroupLabelPaddingX
 			width := math.Min(strip.W, desired)
 			width = math.Max(0, width)
-			x := alignedLabelX(strip, width, p.Element.ContainerAttributes.LabelAlign, routes)
+			x := alignedLabelX(strip, width, p.element.containerAttributes.LabelAlign, routes)
 			labels = append(labels, groupLabel{
-				container: p.Element.ID,
-				fullText:  p.Element.Title,
-				text:      truncateGroupTitle(p.Element.Title, width, cfg),
+				container: p.element.ID,
+				fullText:  p.element.Title,
+				text:      truncateGroupTitle(p.element.Title, width, cfg),
 				rect:      rect{X: x, Y: strip.Y, W: width, H: strip.H},
 			})
 		}
@@ -114,13 +127,13 @@ func placeGroupLabels(root *placement, routes [][]point, cfg Config) []groupLabe
 	return labels
 }
 
-func alignedLabelX(strip rect, width float64, alignment LabelAlignment, routes [][]point) float64 {
+func alignedLabelX(strip rect, width float64, alignment labelAlignment, routes [][]point) float64 {
 	switch alignment {
-	case LabelAlignCenter:
+	case labelAlignCenter:
 		return strip.X + (strip.W-width)/2
-	case LabelAlignRight:
+	case labelAlignRight:
 		return strip.X + strip.W - width
-	case LabelAlignLeft:
+	case labelAlignLeft:
 		return strip.X
 	default:
 		return automaticLabelX(strip, width, routes)
@@ -175,7 +188,7 @@ func labelCrossingScore(label rect, routes [][]point, clearance float64) int {
 	return score
 }
 
-func truncateGroupTitle(title string, width float64, cfg Config) string {
+func truncateGroupTitle(title string, width float64, cfg config) string {
 	available := math.Max(0, width-2*cfg.GroupLabelPaddingX)
 	if float64(utf8.RuneCountInString(title))*cfg.CharacterWidth <= available {
 		return title
@@ -196,13 +209,13 @@ func clamp(value, low, high float64) float64 {
 }
 
 func writeNodes(svg *strings.Builder, p *placement) {
-	if p.Element.Kind == KindNode {
-		fmt.Fprintf(svg, "    <g class=\"boxz-node-group\" data-node=\"%s\">\n", html.EscapeString(p.Element.ID))
+	if p.element.kind == kindNode {
+		fmt.Fprintf(svg, "    <g class=\"boxz-node-group\" data-node=\"%s\">\n", html.EscapeString(p.element.ID))
 		fmt.Fprintf(svg, "      <rect class=\"boxz-node\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" rx=\"6\"/>\n",
 			number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))
 		center := p.Rect.center()
 		fmt.Fprintf(svg, "      <text class=\"boxz-title\" x=\"%s\" y=\"%s\">%s</text>\n",
-			number(center.X), number(center.Y), html.EscapeString(p.Element.Title))
+			number(center.X), number(center.Y), html.EscapeString(p.element.Title))
 		svg.WriteString("    </g>\n")
 		return
 	}
@@ -212,12 +225,12 @@ func writeNodes(svg *strings.Builder, p *placement) {
 }
 
 func writeGroups(svg *strings.Builder, p *placement) {
-	if p.Element.Kind == KindNode {
+	if p.element.kind == kindNode {
 		return
 	}
-	if p.Element.ContainerAttributes.Bounded {
+	if p.element.containerAttributes.Bounded {
 		fmt.Fprintf(svg, "    <rect class=\"boxz-group-boundary\" data-container=\"%s\" data-kind=\"%s\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"/>\n",
-			html.EscapeString(p.Element.ID), p.Element.Kind,
+			html.EscapeString(p.element.ID), p.element.kind,
 			number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))
 	}
 	for _, child := range p.Children {
@@ -241,11 +254,11 @@ func writeGroupLabels(svg *strings.Builder, labels []groupLabel) {
 }
 
 func writeContainers(svg *strings.Builder, p *placement) {
-	if p.Element.Kind == KindNode {
+	if p.element.kind == kindNode {
 		return
 	}
 	fmt.Fprintf(svg, "    <rect class=\"boxz-container\" data-container=\"%s\" data-kind=\"%s\" x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\"/>\n",
-		html.EscapeString(p.Element.ID), p.Element.Kind,
+		html.EscapeString(p.element.ID), p.element.kind,
 		number(p.Rect.X), number(p.Rect.Y), number(p.Rect.W), number(p.Rect.H))
 	for _, child := range p.Children {
 		writeContainers(svg, child)

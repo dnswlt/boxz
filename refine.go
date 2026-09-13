@@ -24,7 +24,7 @@ var refinementRules = []refinementRule{minimalManhattanRule}
 // refineDisplayRoutes is a deliberately local post-routing pass. It can remove
 // metric artifacts introduced by lane allocation, but it cannot change ports,
 // bounded-region crossings, or any layout capacity.
-func refineDisplayRoutes(l *layout, routes *routeResult, cfg Config) {
+func refineDisplayRoutes(l *layout, routes *routeResult, cfg config) {
 	refiner := routeRefiner{l: l, routes: routes, clearance: math.Max(1, cfg.LaneSpacing)}
 	collectRefinementGeometry(l.Root, &refiner.nodes, &refiner.boundaries)
 	for _, route := range routes.Edges {
@@ -33,11 +33,11 @@ func refineDisplayRoutes(l *layout, routes *routeResult, cfg Config) {
 }
 
 func collectRefinementGeometry(p *placement, nodes *[]*placement, boundaries *[]rect) {
-	if p.Element.Kind == KindNode {
+	if p.element.kind == kindNode {
 		*nodes = append(*nodes, p)
 		return
 	}
-	if p.Element.ContainerAttributes.Bounded {
+	if p.element.containerAttributes.Bounded {
 		*boundaries = append(*boundaries, p.Rect)
 	}
 	for _, child := range p.Children {
@@ -163,8 +163,8 @@ func (r *routeRefiner) routeAvoidsNodes(route *routedEdge, points []point) bool 
 				return false
 			}
 			for _, contact := range trace.points {
-				fromPort := index == 1 && node.Element.ID == route.From && samePoint(contact, points[0])
-				toPort := index == len(points)-1 && node.Element.ID == route.To && samePoint(contact, points[len(points)-1])
+				fromPort := index == 1 && node.element.ID == route.From && samePoint(contact, points[0])
+				toPort := index == len(points)-1 && node.element.ID == route.To && samePoint(contact, points[len(points)-1])
 				if !fromPort && !toPort {
 					return false
 				}

@@ -11,35 +11,35 @@ import (
 	"github.com/alecthomas/participle/v2/lexer"
 )
 
-// Kind identifies the role an element plays in the layout tree.
-type Kind string
+// kind identifies the role an element plays in the layout tree.
+type kind string
 
 const (
-	KindNode Kind = "node"
-	KindHBox Kind = "hbox"
-	KindVBox Kind = "vbox"
+	kindNode kind = "node"
+	kindHBox kind = "hbox"
+	kindVBox kind = "vbox"
 )
 
-// NodeAttributes contains the validated attributes available to visible nodes.
-type NodeAttributes struct {
+// nodeAttributes contains the validated attributes available to visible nodes.
+type nodeAttributes struct {
 	Spring bool
 }
 
-// LabelAlignment controls the horizontal placement of a container label.
-// The zero value, like LabelAlignAuto, selects automatic placement.
-type LabelAlignment string
+// labelAlignment controls the horizontal placement of a container label.
+// The zero value, like labelAlignAuto, selects automatic placement.
+type labelAlignment string
 
 const (
-	LabelAlignAuto   LabelAlignment = "auto"
-	LabelAlignLeft   LabelAlignment = "left"
-	LabelAlignCenter LabelAlignment = "center"
-	LabelAlignRight  LabelAlignment = "right"
+	labelAlignAuto   labelAlignment = "auto"
+	labelAlignLeft   labelAlignment = "left"
+	labelAlignCenter labelAlignment = "center"
+	labelAlignRight  labelAlignment = "right"
 )
 
-// ContainerAttributes contains the validated attributes available to layout
+// containerAttributes contains the validated attributes available to layout
 // containers. Containers remain structural and cannot be edge endpoints.
-type ContainerAttributes struct {
-	LabelAlign LabelAlignment
+type containerAttributes struct {
+	LabelAlign labelAlignment
 	// Bounded makes the container a visible routing boundary. Titles enable it
 	// by default, while an explicit attribute may override that default.
 	Bounded bool
@@ -55,24 +55,33 @@ const (
 	West  Side = "W"
 )
 
-// Document is a parsed and validated boxz document.
+// Document is a parsed or programmatically derived boxz document. Its
+// representation is private so a valid document cannot be mutated behind the
+// package's back; use Nodes, Edges, and WithEdges to inspect or transform it.
 type Document struct {
-	Root  *Element
-	Edges []*Edge
+	root     *element
+	edges    []*Edge
+	filename string
 }
 
-// Element is either a visible node or an ordered layout container.
-type Element struct {
-	Kind                Kind
+// Node is an immutable snapshot of a visible node in a document.
+type Node struct {
+	ID    string
+	Title string
+}
+
+// element is either a visible node or an ordered layout container.
+type element struct {
+	kind                kind
 	ID                  string
 	Title               string
-	NodeAttributes      NodeAttributes
-	ContainerAttributes ContainerAttributes
-	Children            []*Element
+	nodeAttributes      nodeAttributes
+	containerAttributes containerAttributes
+	Children            []*element
 	// Springs has one entry before each child and one after the last child.
 	// Its value is the number of equal-weight springs in that gap; nil means none.
 	Springs  []int
-	Parent   *Element
+	Parent   *element
 	position lexer.Position
 }
 
@@ -178,6 +187,18 @@ func quotedIdentifierRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+// isPlainIdentifier is shared by source formatting and routing keys so the
+// two representations agree about which IDs need quoting.
+func isPlainIdentifier(id string) bool {
+	for index, r := range id {
+		if r == '_' || unicode.IsLetter(r) || index > 0 && unicode.IsDigit(r) {
+			continue
+		}
+		return false
+	}
+	return id != ""
+}
+
 // Parse reads a boxz document. The filename is used in diagnostics only.
 func Parse(filename string, r io.Reader) (*Document, error) {
 	parsed, err := documentParser.Parse(filename, r)
@@ -185,15 +206,15 @@ func Parse(filename string, r io.Reader) (*Document, error) {
 		return nil, err
 	}
 
-	doc := &Document{}
+	doc := &Document{filename: filename}
 	seen := make(map[string]lexer.Position)
-	doc.Root, err = convertElement(filename, parsed.Root, nil, seen)
+	doc.root, err = convertElement(filename, parsed.Root, nil, seen)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes := make(map[string]*Element)
-	collectNodes(doc.Root, nodes)
+	nodes := make(map[string]*element)
+	collectNodes(doc.root, nodes)
 	var parsedEdges []*syntaxEdge
 	if parsed.EdgeBlock != nil {
 		parsedEdges = parsed.EdgeBlock.Edges
@@ -203,7 +224,7 @@ func Parse(filename string, r io.Reader) (*Document, error) {
 		if edgeErr != nil {
 			return nil, edgeErr
 		}
-		doc.Edges = append(doc.Edges, edge)
+		doc.edges = append(doc.edges, edge)
 	}
 	// Planning here makes topology and side errors parse-time errors rather than
 	// failures that depend on a later choice of rendering dimensions.
@@ -218,7 +239,7 @@ func ParseString(filename, source string) (*Document, error) {
 	return Parse(filename, strings.NewReader(source))
 }
 
-func convertElement(filename string, raw *syntaxElement, parent *Element, seen map[string]lexer.Position) (*Element, error) {
+func convertElement(filename string, raw *syntaxElement, parent *element, seen map[string]lexer.Position) (*element, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("%s: document must contain a root element", filename)
 	}
@@ -227,14 +248,14 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 	}
 	seen[raw.ID] = raw.Pos
 
-	element := &Element{
-		Kind:     Kind(raw.Kind),
+	element := &element{
+		kind:     kind(raw.Kind),
 		ID:       raw.ID,
 		Parent:   parent,
 		position: raw.Pos,
 	}
-	switch element.Kind {
-	case KindNode:
+	switch element.kind {
+	case kindNode:
 		if raw.Body != nil {
 			return nil, diagnostic(filename, raw.Pos, "node %q cannot contain children", raw.ID)
 		}
@@ -243,11 +264,11 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 		} else {
 			element.Title = *raw.Title
 		}
-	case KindHBox, KindVBox:
+	case kindHBox, kindVBox:
 		if raw.Title != nil {
 			element.Title = *raw.Title
 		}
-		element.ContainerAttributes.Bounded = element.Title != ""
+		element.containerAttributes.Bounded = element.Title != ""
 	default:
 		return nil, diagnostic(filename, raw.Pos, "unknown element kind %q", raw.Kind)
 	}
@@ -259,7 +280,7 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 	if raw.Body != nil {
 		items = raw.Body.Items
 	}
-	if element.Kind != KindNode {
+	if element.kind != kindNode {
 		element.Springs = []int{0}
 	}
 	for _, item := range items {
@@ -274,7 +295,7 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 		element.Children = append(element.Children, converted)
 		element.Springs = append(element.Springs, 0)
 	}
-	if element.Kind != KindNode && len(element.Children) == 0 {
+	if element.kind != kindNode && len(element.Children) == 0 {
 		return nil, diagnostic(filename, raw.Pos, "%s %q must contain at least one child", raw.Kind, raw.ID)
 	}
 	return element, nil
@@ -282,7 +303,7 @@ func convertElement(filename string, raw *syntaxElement, parent *Element, seen m
 
 // convertAttributes compiles the generic surface syntax into the typed model.
 // Attribute names and scalar representations should not escape this boundary.
-func convertAttributes(filename string, element *Element, raw *syntaxAttributes) error {
+func convertAttributes(filename string, element *element, raw *syntaxAttributes) error {
 	if raw == nil {
 		return nil
 	}
@@ -293,33 +314,33 @@ func convertAttributes(filename string, element *Element, raw *syntaxAttributes)
 		}
 		seen[attribute.Key] = true
 		switch {
-		case element.Kind == KindNode && attribute.Key == "spring":
+		case element.kind == kindNode && attribute.Key == "spring":
 			enabled, ok := booleanAttribute(attribute.Value)
 			if !ok {
 				return diagnostic(filename, attribute.Pos, "attribute %q on node %q must be a flag or boolean", attribute.Key, element.ID)
 			}
-			element.NodeAttributes.Spring = enabled
-		case element.Kind != KindNode && attribute.Key == "labelAlign":
+			element.nodeAttributes.Spring = enabled
+		case element.kind != kindNode && attribute.Key == "labelAlign":
 			alignment, ok := labelAlignAttribute(attribute.Value)
 			if !ok {
-				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be auto, left, center, or right", attribute.Key, element.Kind, element.ID)
+				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be auto, left, center, or right", attribute.Key, element.kind, element.ID)
 			}
-			element.ContainerAttributes.LabelAlign = alignment
-		case element.Kind != KindNode && attribute.Key == "bounded":
+			element.containerAttributes.LabelAlign = alignment
+		case element.kind != kindNode && attribute.Key == "bounded":
 			enabled, ok := booleanAttribute(attribute.Value)
 			if !ok {
-				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be a flag or boolean", attribute.Key, element.Kind, element.ID)
+				return diagnostic(filename, attribute.Pos, "attribute %q on %s %q must be a flag or boolean", attribute.Key, element.kind, element.ID)
 			}
-			element.ContainerAttributes.Bounded = enabled
+			element.containerAttributes.Bounded = enabled
 		default:
-			return diagnostic(filename, attribute.Pos, "attribute %q is not supported on %s %q", attribute.Key, element.Kind, element.ID)
+			return diagnostic(filename, attribute.Pos, "attribute %q is not supported on %s %q", attribute.Key, element.kind, element.ID)
 		}
 	}
-	if element.Parent == nil && element.NodeAttributes.Spring {
+	if element.Parent == nil && element.nodeAttributes.Spring {
 		return diagnostic(filename, element.position, "root node %q cannot be spring-enabled", element.ID)
 	}
-	if element.Kind != KindNode && element.Title == "" && element.ContainerAttributes.LabelAlign != "" {
-		return diagnostic(filename, element.position, "%s %q has labelAlign but no title", element.Kind, element.ID)
+	if element.kind != kindNode && element.Title == "" && element.containerAttributes.LabelAlign != "" {
+		return diagnostic(filename, element.position, "%s %q has labelAlign but no title", element.kind, element.ID)
 	}
 	return nil
 }
@@ -341,34 +362,25 @@ func booleanAttribute(value *syntaxAttributeValue) (bool, bool) {
 	}
 }
 
-func labelAlignAttribute(value *syntaxAttributeValue) (LabelAlignment, bool) {
+func labelAlignAttribute(value *syntaxAttributeValue) (labelAlignment, bool) {
 	if value == nil || value.Ident == nil {
 		return "", false
 	}
 	switch strings.ToLower(*value.Ident) {
-	case string(LabelAlignAuto):
-		return LabelAlignAuto, true
-	case string(LabelAlignLeft):
-		return LabelAlignLeft, true
-	case string(LabelAlignCenter):
-		return LabelAlignCenter, true
-	case string(LabelAlignRight):
-		return LabelAlignRight, true
+	case string(labelAlignAuto):
+		return labelAlignAuto, true
+	case string(labelAlignLeft):
+		return labelAlignLeft, true
+	case string(labelAlignCenter):
+		return labelAlignCenter, true
+	case string(labelAlignRight):
+		return labelAlignRight, true
 	default:
 		return "", false
 	}
 }
 
-func convertEdge(filename string, raw *syntaxEdge, nodes map[string]*Element) (*Edge, error) {
-	if nodes[raw.From.ID] == nil {
-		return nil, diagnostic(filename, raw.Pos, "edge source %q is not a node", raw.From.ID)
-	}
-	if nodes[raw.To.ID] == nil {
-		return nil, diagnostic(filename, raw.Pos, "edge destination %q is not a node", raw.To.ID)
-	}
-	if raw.From.ID == raw.To.ID {
-		return nil, diagnostic(filename, raw.Pos, "self-edge on %q is not supported yet", raw.From.ID)
-	}
+func convertEdge(filename string, raw *syntaxEdge, nodes map[string]*element) (*Edge, error) {
 	fromSide, err := parseSide(filename, raw.Pos, raw.From.Side)
 	if err != nil {
 		return nil, err
@@ -378,6 +390,9 @@ func convertEdge(filename string, raw *syntaxEdge, nodes map[string]*Element) (*
 		return nil, err
 	}
 	edge := &Edge{From: raw.From.ID, FromSide: fromSide, To: raw.To.ID, ToSide: toSide, position: raw.Pos}
+	if err := validateEdge(nodes, edge, -1); err != nil {
+		return nil, err
+	}
 	return edge, nil
 }
 
@@ -386,25 +401,23 @@ func parseSide(filename string, pos lexer.Position, raw *string) (*Side, error) 
 		return nil, nil
 	}
 	side := Side(strings.ToUpper(*raw))
-	switch side {
-	case North, East, South, West:
-		return &side, nil
-	default:
+	if !validSide(side) {
 		return nil, diagnostic(filename, pos, "unknown side %q (want N, E, S, or W)", *raw)
 	}
+	return &side, nil
 }
 
-func allowedSides(node *Element) [2]Side {
+func allowedSides(node *element) [2]Side {
 	// A node enters the channel system owned by its immediate parent. Hboxes
 	// expose their children vertically; vboxes expose them horizontally.
-	if node.Parent == nil || node.Parent.Kind == KindHBox {
+	if node.Parent == nil || node.Parent.kind == kindHBox {
 		return [2]Side{North, South}
 	}
 	return [2]Side{West, East}
 }
 
-func collectNodes(element *Element, nodes map[string]*Element) {
-	if element.Kind == KindNode {
+func collectNodes(element *element, nodes map[string]*element) {
+	if element.kind == kindNode {
 		nodes[element.ID] = element
 		return
 	}

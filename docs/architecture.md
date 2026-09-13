@@ -4,7 +4,20 @@ Boxz treats the source tree as the layout. It does not search for a globally
 better arrangement, because preserving source order is what makes diagrams
 stable across edits.
 
-The rendering pipeline is:
+The public document pipeline is:
+
+```text
+source -> parse/validate -> opaque Document -> API transformations
+                                         |-> canonical source
+                                         `-> SVG rendering
+```
+
+The document owns a private layout root and edge sequence. Public query methods
+return copies, and transformations such as `WithEdges` validate a complete
+replacement before returning a new document. Internal parent pointers remain a
+useful tree index; opacity prevents them from becoming mutable public state.
+
+Within SVG rendering, the pipeline is:
 
 ```text
 source -> syntax tree -> topology plan
@@ -38,6 +51,9 @@ The implementation follows those phase boundaries:
 
 - `syntax.go` parses the ordered tree and performs topology-dependent
   validation;
+- `document.go` exposes copied views and validity-preserving document
+  transformations;
+- `format.go` writes canonical source without feeding it back into rendering;
 - `topology.go` classifies direct seams and records conservative port demand;
 - `layout.go` measures and places elements and their owned channels;
 - `route.go` constructs the structural graph and finds outer routes;
@@ -51,7 +67,7 @@ The implementation follows those phase boundaries:
 An `hbox` lays out children from west to east and owns outer channels on its
 north and south sides. A `vbox` lays out children from north to south and owns
 west and east channels. Nodes are the only connectable elements. Every
-container is structural, while `ContainerAttributes.Bounded` independently
+container is structural, while `containerAttributes.Bounded` independently
 controls whether it creates a visible boundary and routing region. Parsing
 initializes that property from the presence of a title, then applies an
 explicit `bounded` override. Routing never infers region semantics from title
@@ -59,8 +75,8 @@ text.
 
 Attribute syntax is deliberately generic, but the validated model is not.
 `syntax.go` converts parsed key/value pairs into explicit subject-specific
-fields such as `NodeAttributes.Spring` and
-`ContainerAttributes.LabelAlign` and `ContainerAttributes.Bounded`. Unknown
+fields such as `nodeAttributes.Spring`, `containerAttributes.LabelAlign`, and
+`containerAttributes.Bounded`. Unknown
 names and incompatible value types are rejected at that boundary; routing and
 layout never interpret raw attribute strings or generic maps.
 

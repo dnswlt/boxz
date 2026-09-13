@@ -36,7 +36,7 @@ edges { b -> a b -> x b -> y }
 			if err != nil {
 				t.Fatal(err)
 			}
-			l, routes, ports, err := solve(doc, DefaultConfig())
+			l, routes, ports, err := solve(doc, defaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -48,11 +48,11 @@ edges { b -> a b -> x b -> y }
 						route.From, route.To, route.Points[0], route.Points[len(route.Points)-1], fromPort, toPort)
 				}
 			}
-			assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
-			assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+			assertRoutesMeetPortsCleanly(t, l, routes, ports, defaultConfig())
+			assertNoDisplayRouteOverlaps(t, routes, ports, defaultConfig(), 1)
 
 			var output bytes.Buffer
-			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+			if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 				t.Fatal(err)
 			}
 			assertNoCollinearEdgeOverlaps(t, output.String())
@@ -72,7 +72,7 @@ edges { a1 -> c2 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, routes, _, err := solve(doc, DefaultConfig())
+	_, routes, _, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ edges { a1 -> c2 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, routes, _, err := solve(doc, DefaultConfig())
+	_, routes, _, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ edges { a1 -> c2 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, routes, _, err := solve(doc, DefaultConfig())
+	_, routes, _, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ edges { a1 -> c2 }
 	}
 
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `class="boxz-group-boundary" data-container="middle"`) {
@@ -216,7 +216,7 @@ edges {
 			if plan.Seams[0] != nil {
 				t.Fatalf("route unexpectedly classified as a direct seam: %#v", plan.Seams[0])
 			}
-			_, routes, _, err := solve(doc, DefaultConfig())
+			_, routes, _, err := solve(doc, defaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -241,7 +241,7 @@ edges {
 				t.Fatalf("route resources = %#v, want a sibling crossbar", routes.ResourceUses)
 			}
 
-			debugConfig := DefaultConfig()
+			debugConfig := defaultConfig()
 			debugConfig.Debug = true
 			var first, second bytes.Buffer
 			if err := RenderSVG(&first, doc, debugConfig); err != nil {

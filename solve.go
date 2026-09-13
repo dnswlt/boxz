@@ -8,12 +8,12 @@ import (
 // solve alternates layout, route selection, and physical track allocation
 // until every local routing domain has enough room. It returns exact display
 // paths; SVG rendering makes no further routing decisions.
-func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point, error) {
+func solve(doc *Document, cfg config) (*layout, *routeResult, map[portKey]point, error) {
 	plan, err := buildRoutingPlan(doc)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if cfg.EdgeRouter == RouterAvoid {
+	if cfg.EdgeRouter == routerAvoid {
 		l, routes, ports, err := solveWithAvoid(doc, cfg, plan)
 		if err != nil {
 			return nil, nil, nil, err
@@ -25,7 +25,7 @@ func solve(doc *Document, cfg Config) (*layout, *routeResult, map[portKey]point,
 	// while routing needs coordinates. Allocations only grow, so the loop cannot
 	// oscillate between smaller and larger layouts.
 	allocated := make(map[string]int)
-	for iteration := 0; iteration < len(doc.Edges)*3+8; iteration++ {
+	for iteration := 0; iteration < len(doc.edges)*3+8; iteration++ {
 		l, err := buildLayout(doc, cfg, allocated, plan)
 		if err != nil {
 			return nil, nil, nil, err
@@ -133,7 +133,7 @@ func allocatePorts(l *layout, routes *routeResult) map[portKey]point {
 
 // displayRoute is retained as the internal inspection helper used by tests.
 // Solved routes already own their exact geometry.
-func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg Config) []point {
+func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg config) []point {
 	if route.Display != nil {
 		return route.Display
 	}
@@ -142,7 +142,7 @@ func displayRoute(route *routedEdge, routes *routeResult, ports map[portKey]poin
 
 // materializeRoute converts a domain-aware route to its assigned channel lanes
 // and exact node ports without introducing lane-width jogs.
-func materializeRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg Config) []point {
+func materializeRoute(route *routedEdge, routes *routeResult, ports map[portKey]point, cfg config) []point {
 	type straightRun struct {
 		a          point
 		b          point

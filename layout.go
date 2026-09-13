@@ -4,59 +4,16 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 	"unicode/utf8"
+
+	"github.com/dnswlt/boxz/internal/renderconfig"
 )
 
-// Config contains rendering options and the deliberately simple geometry
-// constants used by the MVP.
-type Config struct {
-	// Debug adds diagnostic SVG layers without changing layout or routing.
-	Debug              bool
-	CharacterWidth     float64
-	LineHeight         float64
-	NodePaddingX       float64
-	NodePaddingY       float64
-	GroupLabelPaddingX float64
-	GroupLabelPaddingY float64
-	MinNodeWidth       float64
-	MinNodeHeight      float64
-	ChildGap           float64
-	AlongPadding       float64
-	ChannelSize        float64
-	ChannelPadding     float64
-	LaneSpacing        float64
-	CanvasMargin       float64
-	// EdgeRouter selects the routing implementation. The zero value is the
-	// built-in structural router.
-	EdgeRouter RouterKind
-	// AvoidBinary overrides discovery of the boxz-avoid executable. Only
-	// consulted when EdgeRouter is RouterAvoid.
-	AvoidBinary string
-	// AvoidTimeout bounds routing with boxz-avoid; the router is killed when it
-	// expires. Zero means 30 seconds.
-	AvoidTimeout time.Duration
-}
+type config = renderconfig.Config
 
-// DefaultConfig returns conservative dimensions suitable for the bundled SVG style.
-func DefaultConfig() Config {
-	return Config{
-		CharacterWidth:     8,
-		LineHeight:         18,
-		NodePaddingX:       16,
-		NodePaddingY:       11,
-		GroupLabelPaddingX: 8,
-		GroupLabelPaddingY: 5,
-		MinNodeWidth:       64,
-		MinNodeHeight:      40,
-		ChildGap:           48,
-		AlongPadding:       24,
-		ChannelSize:        28,
-		ChannelPadding:     7,
-		LaneSpacing:        8,
-		CanvasMargin:       20,
-	}
-}
+func defaultConfig() config { return renderconfig.Default() }
+
+const routerAvoid = renderconfig.RouterAvoid
 
 type point struct {
 	X float64
@@ -81,7 +38,7 @@ type channel struct {
 }
 
 type placement struct {
-	Element    *Element
+	element    *element
 	Rect       rect
 	LabelStrip rect
 	Children   []*placement
@@ -100,7 +57,7 @@ type layout struct {
 // measured is the bottom-up size of an element. Container side fields are the
 // channel bands reserved inside its rectangle; gaps reserve sibling seams.
 type measured struct {
-	element *Element
+	element *element
 	w       float64
 	h       float64
 	// growX/growY say whether the subtree can absorb surplus on each axis.
@@ -121,14 +78,14 @@ type measured struct {
 
 // buildLayout separates bottom-up measurement from top-down placement so child
 // order and alignment never depend on traversal side effects.
-func buildLayout(doc *Document, cfg Config, capacity map[string]int, plan *routingPlan) (*layout, error) {
+func buildLayout(doc *Document, cfg config, capacity map[string]int, plan *routingPlan) (*layout, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	if err := validateSpringSlots(doc.Root); err != nil {
+	if err := validateSpringSlots(doc.root); err != nil {
 		return nil, err
 	}
-	m := measureElement(doc.Root, cfg, capacity, plan)
+	m := measureElement(doc.root, cfg, capacity, plan)
 	result := &layout{
 		ByID:              make(map[string]*placement),
 		Channels:          make(map[string]*channel),
@@ -146,11 +103,11 @@ func buildLayout(doc *Document, cfg Config, capacity map[string]int, plan *routi
 
 // validateSpringSlots protects the positional spring representation used during
 // placement. A nil slice is the convenient programmatic form for no springs.
-func validateSpringSlots(element *Element) error {
+func validateSpringSlots(element *element) error {
 	if element == nil {
 		return fmt.Errorf("boxz: document has no root element")
 	}
-	if element.Kind == KindNode {
+	if element.kind == kindNode {
 		if len(element.Springs) != 0 {
 			return fmt.Errorf("boxz: node %q cannot contain spring slots", element.ID)
 		}
@@ -158,11 +115,11 @@ func validateSpringSlots(element *Element) error {
 	}
 	want := len(element.Children) + 1
 	if len(element.Springs) != 0 && len(element.Springs) != want {
-		return fmt.Errorf("boxz: %s %q has %d spring slots; want %d", element.Kind, element.ID, len(element.Springs), want)
+		return fmt.Errorf("boxz: %s %q has %d spring slots; want %d", element.kind, element.ID, len(element.Springs), want)
 	}
 	for _, count := range element.Springs {
 		if count < 0 {
-			return fmt.Errorf("boxz: %s %q has a negative spring count", element.Kind, element.ID)
+			return fmt.Errorf("boxz: %s %q has a negative spring count", element.kind, element.ID)
 		}
 	}
 	for _, child := range element.Children {
@@ -173,7 +130,7 @@ func validateSpringSlots(element *Element) error {
 	return nil
 }
 
-func validateConfig(cfg Config) error {
+func validateConfig(cfg config) error {
 	values := []struct {
 		name  string
 		value float64
@@ -199,9 +156,9 @@ func validateConfig(cfg Config) error {
 
 // measureElement reserves node ports, sibling seams, and outer channel bands in
 // a bottom-up pass.
-func measureElement(element *Element, cfg Config, capacity map[string]int, plan *routingPlan) *measured {
+func measureElement(element *element, cfg config, capacity map[string]int, plan *routingPlan) *measured {
 	m := &measured{element: element}
-	if element.Kind == KindNode {
+	if element.kind == kindNode {
 		m.w = math.Max(cfg.MinNodeWidth, float64(utf8.RuneCountInString(element.Title))*cfg.CharacterWidth+2*cfg.NodePaddingX)
 		m.h = math.Max(cfg.MinNodeHeight, cfg.LineHeight+2*cfg.NodePaddingY)
 		ports := plan.PortCount[element.ID]
@@ -225,9 +182,9 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 		if capacity := maxInt(west, east); capacity > 0 {
 			m.h = math.Max(m.h, float64(capacity+1)*cfg.LaneSpacing)
 		}
-		if element.NodeAttributes.Spring && element.Parent != nil {
-			m.growX = element.Parent.Kind == KindHBox
-			m.growY = element.Parent.Kind == KindVBox
+		if element.nodeAttributes.Spring && element.Parent != nil {
+			m.growX = element.Parent.kind == kindHBox
+			m.growY = element.Parent.kind == kindVBox
 		}
 		return m
 	}
@@ -243,7 +200,7 @@ func measureElement(element *Element, cfg Config, capacity map[string]int, plan 
 		lanes := plan.SeamTrackCount[id] + capacity[seamChannelID(id)]
 		m.gaps = append(m.gaps, seamBand(cfg, lanes))
 	}
-	if element.Kind == KindHBox {
+	if element.kind == kindHBox {
 		m.start = gutterBand(cfg, capacity[gutterChannelID(element.ID, West)])
 		m.end = gutterBand(cfg, capacity[gutterChannelID(element.ID, East)])
 		m.top = channelBand(cfg, capacity[channelID(element.ID, North)])
@@ -305,7 +262,7 @@ func hierarchyConnectorCapacity(capacity map[string]int, elementID string, side 
 	return total
 }
 
-func springCount(element *Element) int {
+func springCount(element *element) int {
 	total := 0
 	for _, count := range element.Springs {
 		total += count
@@ -313,7 +270,7 @@ func springCount(element *Element) int {
 	return total
 }
 
-func springSlot(element *Element, index int) int {
+func springSlot(element *element, index int) int {
 	if element.Springs == nil {
 		return 0
 	}
@@ -322,7 +279,7 @@ func springSlot(element *Element, index int) int {
 
 // gapSpringCount maps measured gap i (between children i and i+1) to
 // spring slot i+1, since slot 0 is the leading edge of the container.
-func gapSpringCount(element *Element, gapIndex int) int {
+func gapSpringCount(element *element, gapIndex int) int {
 	return springSlot(element, gapIndex+1)
 }
 
@@ -332,42 +289,42 @@ func gapSpringCount(element *Element, gapIndex int) int {
 func growthWeight(m *measured) int {
 	weight := springCount(m.element)
 	for _, child := range m.children {
-		if (m.element.Kind == KindHBox && child.growX) || (m.element.Kind == KindVBox && child.growY) {
+		if (m.element.kind == kindHBox && child.growX) || (m.element.kind == kindVBox && child.growY) {
 			weight++
 		}
 	}
 	return weight
 }
 
-func channelBand(cfg Config, lanes int) float64 {
+func channelBand(cfg config, lanes int) float64 {
 	needed := float64(lanes)*cfg.LaneSpacing + 2*cfg.ChannelPadding
 	return math.Max(cfg.ChannelSize, needed)
 }
 
-func seamBand(cfg Config, lanes int) float64 {
+func seamBand(cfg config, lanes int) float64 {
 	needed := float64(lanes)*cfg.LaneSpacing + 2*cfg.ChannelPadding
 	return math.Max(cfg.ChildGap, needed)
 }
 
-func gutterBand(cfg Config, lanes int) float64 {
+func gutterBand(cfg config, lanes int) float64 {
 	needed := float64(lanes)*cfg.LaneSpacing + 2*cfg.ChannelPadding
 	return math.Max(cfg.AlongPadding, needed)
 }
 
 // placeElement arranges an element within its assigned slot. Edge springs may
 // make the element's compact routing rectangle smaller than that slot.
-func placeElement(m *measured, slot rect, cfg Config, result *layout) *placement {
+func placeElement(m *measured, slot rect, cfg config, result *layout) *placement {
 	p := &placement{
-		Element:  m.element,
+		element:  m.element,
 		Rect:     slot,
 		Channels: make(map[Side]*channel),
 	}
 	result.ByID[m.element.ID] = p
-	if m.element.Kind == KindNode {
+	if m.element.kind == kindNode {
 		return p
 	}
 
-	if m.element.Kind == KindHBox {
+	if m.element.kind == kindHBox {
 		unit, leading, trailing := springAllocation(m, slot.W-m.w)
 		p.Rect.X += leading
 		p.Rect.W -= leading + trailing
@@ -459,8 +416,8 @@ func growthUnit(extra float64, weight int) float64 {
 
 func addChannel(result *layout, owner *placement, side Side, a, b point) {
 	c := &channel{
-		ID:     channelID(owner.Element.ID, side),
-		Region: routingRegionID(owner.Element),
+		ID:     channelID(owner.element.ID, side),
+		Region: routingRegionID(owner.element),
 		A:      a,
 		B:      b,
 	}

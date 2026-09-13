@@ -66,7 +66,7 @@ const (
 type connectorSpec struct {
 	ResourceID string
 	DomainID   string
-	Kind       connectorKind
+	kind       connectorKind
 	Horizontal bool
 	Low        float64
 	High       float64
@@ -77,7 +77,7 @@ type connectorSpec struct {
 // sibling domains live in an already measured seam.
 type connectorDomain struct {
 	ID         string
-	Kind       connectorKind
+	kind       connectorKind
 	Horizontal bool
 	Low        float64
 	High       float64
@@ -140,7 +140,7 @@ type routeResult struct {
 // congestion tie-breaker for later ones. Seam routes are prescribed by the
 // topology plan; after exact ports exist they still claim any connector domains
 // crossed by their exposure paths.
-func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*routeResult, error) {
+func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg config) (*routeResult, error) {
 	graph, err := makeRouteGraph(l)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 		result.Segments = graph.segments
 	}
 	usage := make(map[string]int)
-	for index, edge := range doc.Edges {
+	for index, edge := range doc.edges {
 		if spec := plan.Seams[index]; spec != nil {
 			fromStart := sideCenter(l.ByID[edge.From].Rect, spec.FromSide)
 			toStart := sideCenter(l.ByID[edge.To].Rect, spec.ToSide)
@@ -170,8 +170,8 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 			result.Edges = append(result.Edges, route)
 			continue
 		}
-		from := l.ByID[edge.From].Element
-		to := l.ByID[edge.To].Element
+		from := l.ByID[edge.From].element
+		to := l.ByID[edge.To].element
 		route, routeErr := shortestRoute(graph, edge, index, usage, allowedRoutingRegions(from, to))
 		if routeErr != nil {
 			return nil, routeErr
@@ -220,14 +220,14 @@ func routeDocument(doc *Document, l *layout, plan *routingPlan, cfg Config) (*ro
 
 // routeThroughSeam projects both endpoints to their shared sibling gap and
 // joins them on one track, or on two tracks connected by a local dogleg.
-func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, fromStart, toStart point, cfg Config) (*routedEdge, error) {
+func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, fromStart, toStart point, cfg config) (*routedEdge, error) {
 	parent := l.ByID[spec.ParentID]
 	if parent == nil || spec.FirstChild+1 >= len(parent.Children) {
 		return nil, fmt.Errorf("boxz: internal routing error: seam %q is missing", spec.ID)
 	}
 	first, second := parent.Children[spec.FirstChild], parent.Children[spec.FirstChild+1]
-	fromInFirst := containsElement(first.Element, l.ByID[edge.From].Element)
-	firstNode, secondNode := l.ByID[edge.From].Element, l.ByID[edge.To].Element
+	fromInFirst := containsElement(first.element, l.ByID[edge.From].element)
+	firstNode, secondNode := l.ByID[edge.From].element, l.ByID[edge.To].element
 	firstSide, secondSide := spec.FromSide, spec.ToSide
 	firstStart, secondStart := fromStart, toStart
 	if !fromInFirst {
@@ -264,7 +264,7 @@ func routeThroughSeam(l *layout, edge *Edge, edgeIndex int, spec *seamSpec, from
 		domains = append(domains, domain)
 	}
 	seamDomain := seamConnectorDomainID(spec.ID)
-	if parent.Element.Kind == KindVBox {
+	if parent.element.kind == kindVBox {
 		seamCenter := (first.Rect.Y + first.Rect.H + second.Rect.Y) / 2
 		firstY, secondY := seamCenter+firstOffset, seamCenter+secondOffset
 		appendPoint(point{X: firstEnd.X, Y: firstY}, seamDomain)
@@ -317,7 +317,7 @@ func trackOffset(track, count int, spacing float64) float64 {
 
 // routeRunOffset returns the display lane selected by the first named routing
 // channel domain in a collinear run.
-func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg Config) float64 {
+func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg config) float64 {
 	for segmentIndex := first; segmentIndex <= last; segmentIndex++ {
 		domain := route.Domains[segmentIndex]
 		lane, ok := routes.LaneByEdge[route.EdgeIndex][domain]
@@ -333,13 +333,13 @@ func routeRunOffset(route *routedEdge, routes *routeResult, first, last int, cfg
 	return 0
 }
 
-func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, ports map[portKey]point, cfg Config) error {
+func rerouteSeams(doc *Document, l *layout, plan *routingPlan, routes *routeResult, ports map[portKey]point, cfg config) error {
 	for index, route := range routes.Edges {
 		spec := plan.Seams[route.EdgeIndex]
 		if spec == nil {
 			continue
 		}
-		edge := doc.Edges[route.EdgeIndex]
+		edge := doc.edges[route.EdgeIndex]
 		fromPort, fromOK := ports[portKey{node: edge.From, side: spec.FromSide, edge: route.EdgeIndex}]
 		toPort, toOK := ports[portKey{node: edge.To, side: spec.ToSide, edge: route.EdgeIndex, to: true}]
 		if !fromOK || !toOK {
@@ -363,9 +363,9 @@ type exposure struct {
 // enclosing rectangle up to root's requested side. It also records hierarchy
 // connector domains crossed by the prescribed path, so seam routes participate
 // in the same physical allocation as searched routes.
-func exposurePath(root *placement, node *Element, side Side, start point) (*exposure, bool) {
-	if root.Element.Kind == KindNode {
-		if root.Element != node {
+func exposurePath(root *placement, node *element, side Side, start point) (*exposure, bool) {
+	if root.element.kind == kindNode {
+		if root.element != node {
 			return nil, false
 		}
 		return &exposure{Points: []point{start}}, true
@@ -376,7 +376,7 @@ func exposurePath(root *placement, node *Element, side Side, start point) (*expo
 	// channel of its own.
 	var child *placement
 	for _, candidate := range root.Children {
-		if containsElement(candidate.Element, node) {
+		if containsElement(candidate.element, node) {
 			child = candidate
 			break
 		}
@@ -397,8 +397,8 @@ func exposurePath(root *placement, node *Element, side Side, start point) (*expo
 		} else {
 			destination.X = c.A.X
 		}
-		if child.Element.Kind != KindNode && child.Channels[side] != nil {
-			domain = riserID(child.Element.ID, side, 0)
+		if child.element.kind != kindNode && child.Channels[side] != nil {
+			domain = riserID(child.element.ID, side, 0)
 		}
 	} else {
 		switch side {
@@ -548,17 +548,17 @@ func makeRouteGraph(l *layout) (*routeGraph, error) {
 // same geometry is private inside a bounded group and permeable in a
 // transparent layout container.
 func addTransitChannels(parent *placement, segments *[]segment) {
-	if parent.Element.Kind == KindNode {
+	if parent.element.kind == kindNode {
 		return
 	}
-	region := routingRegionID(parent.Element)
-	if parent.Element.Kind == KindHBox {
+	region := routingRegionID(parent.element)
+	if parent.element.kind == kindHBox {
 		for _, side := range []Side{West, East} {
 			x := parent.Channels[North].A.X
 			if side == East {
 				x = parent.Channels[North].B.X
 			}
-			id := gutterChannelID(parent.Element.ID, side)
+			id := gutterChannelID(parent.element.ID, side)
 			*segments = append(*segments, segment{
 				A:        point{X: x, Y: parent.Channels[North].A.Y},
 				B:        point{X: x, Y: parent.Channels[South].A.Y},
@@ -571,7 +571,7 @@ func addTransitChannels(parent *placement, segments *[]segment) {
 			if side == South {
 				y = parent.Channels[West].B.Y
 			}
-			id := gutterChannelID(parent.Element.ID, side)
+			id := gutterChannelID(parent.element.ID, side)
 			*segments = append(*segments, segment{
 				A:        point{X: parent.Channels[West].A.X, Y: y},
 				B:        point{X: parent.Channels[East].A.X, Y: y},
@@ -581,9 +581,9 @@ func addTransitChannels(parent *placement, segments *[]segment) {
 	}
 	for index := 0; index+1 < len(parent.Children); index++ {
 		first, second := parent.Children[index], parent.Children[index+1]
-		id := seamChannelID(seamID(parent.Element.ID, index))
+		id := seamChannelID(seamID(parent.element.ID, index))
 		var a, b point
-		if parent.Element.Kind == KindHBox {
+		if parent.element.kind == kindHBox {
 			x := (first.Rect.X + first.Rect.W + second.Rect.X) / 2
 			a = point{X: x, Y: parent.Channels[North].A.Y}
 			b = point{X: x, Y: parent.Channels[South].A.Y}
@@ -605,11 +605,11 @@ func addTransitChannels(parent *placement, segments *[]segment) {
 // routingRegionID separates geometric ownership from routing ownership. An
 // unbounded layout box contributes roads to its nearest bounded ancestor; when
 // no such ancestor exists, the root element names the canvas region.
-func routingRegionID(element *Element) string {
-	var root *Element
-	for current := element; current != nil; current = current.Parent {
+func routingRegionID(start *element) string {
+	var root *element
+	for current := start; current != nil; current = current.Parent {
 		root = current
-		if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+		if current.kind != kindNode && current.containerAttributes.Bounded {
 			return current.ID
 		}
 	}
@@ -624,7 +624,7 @@ func routingRegionID(element *Element) string {
 // is incident to, but prevents unrelated routes from borrowing that group's
 // internal channels. With no common bounded ancestor, the root canvas is the
 // common region.
-func allowedRoutingRegions(from, to *Element) map[string]bool {
+func allowedRoutingRegions(from, to *element) map[string]bool {
 	allowed := make(map[string]bool)
 	lca := lowestCommonAncestor(from, to)
 	if lca == nil {
@@ -633,14 +633,14 @@ func allowedRoutingRegions(from, to *Element) map[string]bool {
 	scope := lca
 	for current := lca; current != nil; current = current.Parent {
 		scope = current
-		if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+		if current.kind != kindNode && current.containerAttributes.Bounded {
 			break
 		}
 	}
 	allowed[routingRegionID(scope)] = true
-	for _, endpoint := range []*Element{from, to} {
+	for _, endpoint := range []*element{from, to} {
 		for current := endpoint.Parent; current != nil; current = current.Parent {
-			if current.Kind != KindNode && current.ContainerAttributes.Bounded {
+			if current.kind != kindNode && current.containerAttributes.Bounded {
 				allowed[current.ID] = true
 			}
 			if current == scope {
@@ -663,13 +663,13 @@ type boundaryAccess struct {
 // sibling gaps. Candidate coordinates come from existing structural vertices,
 // keeping the graph finite and independent of arbitrary geometric visibility.
 func addSiblingCrossbars(parent *placement, baseSegments []segment, segments *[]segment, connectors map[string]connectorSpec, domains map[string]connectorDomain) {
-	if parent.Element.Kind == KindNode {
+	if parent.element.kind == kindNode {
 		return
 	}
 	for index := 0; index+1 < len(parent.Children); index++ {
 		first, second := parent.Children[index], parent.Children[index+1]
 		var firstSide, secondSide Side
-		if parent.Element.Kind == KindHBox {
+		if parent.element.kind == kindHBox {
 			firstSide, secondSide = East, West
 		} else {
 			firstSide, secondSide = South, North
@@ -680,41 +680,41 @@ func addSiblingCrossbars(parent *placement, baseSegments []segment, segments *[]
 			continue
 		}
 
-		coordinates := append(boundaryCoordinates(firstAccess, baseSegments, parent.Element.Kind),
-			boundaryCoordinates(secondAccess, baseSegments, parent.Element.Kind)...)
+		coordinates := append(boundaryCoordinates(firstAccess, baseSegments, parent.element.kind),
+			boundaryCoordinates(secondAccess, baseSegments, parent.element.kind)...)
 		coordinates = sortedUniqueCoordinates(coordinates)
 		crossbarIndex := 0
-		domainID := seamConnectorDomainID(seamID(parent.Element.ID, index))
+		domainID := seamConnectorDomainID(seamID(parent.element.ID, index))
 		for _, coordinate := range coordinates {
-			a, firstOK := boundaryPoint(firstAccess, coordinate, parent.Element.Kind)
-			b, secondOK := boundaryPoint(secondAccess, coordinate, parent.Element.Kind)
+			a, firstOK := boundaryPoint(firstAccess, coordinate, parent.element.kind)
+			b, secondOK := boundaryPoint(secondAccess, coordinate, parent.element.kind)
 			if !firstOK || !secondOK || a == b {
 				continue
 			}
-			id := crossbarID(parent.Element.ID, index, crossbarIndex)
+			id := crossbarID(parent.element.ID, index, crossbarIndex)
 			*segments = append(*segments, segment{
 				A:        a,
 				B:        b,
 				resource: id,
 				domain:   domainID,
-				region:   routingRegionID(parent.Element),
+				region:   routingRegionID(parent.element),
 				kind:     segmentCrossbar,
 			})
 			low, high := coordinate, coordinate
 			if firstAccess.line != nil && secondAccess.line != nil {
-				low, high = boundaryOverlap(*firstAccess.line, *secondAccess.line, parent.Element.Kind)
+				low, high = boundaryOverlap(*firstAccess.line, *secondAccess.line, parent.element.kind)
 			}
 			connectors[id] = connectorSpec{
 				ResourceID: id,
 				DomainID:   domainID,
-				Kind:       connectorSibling,
-				Horizontal: parent.Element.Kind == KindHBox,
+				kind:       connectorSibling,
+				Horizontal: parent.element.kind == kindHBox,
 				Low:        low,
 				High:       high,
 			}
 			mergeConnectorDomain(domains, connectorDomain{
-				ID: domainID, Kind: connectorSibling,
-				Horizontal: parent.Element.Kind == KindHBox, Low: low, High: high,
+				ID: domainID, kind: connectorSibling,
+				Horizontal: parent.element.kind == kindHBox, Low: low, High: high,
 			})
 			crossbarIndex++
 		}
@@ -724,8 +724,8 @@ func addSiblingCrossbars(parent *placement, baseSegments []segment, segments *[]
 	}
 }
 
-func boundaryOverlap(first, second segment, parentKind Kind) (float64, float64) {
-	if parentKind == KindHBox {
+func boundaryOverlap(first, second segment, parentKind kind) (float64, float64) {
+	if parentKind == kindHBox {
 		return math.Max(math.Min(first.A.Y, first.B.Y), math.Min(second.A.Y, second.B.Y)),
 			math.Min(math.Max(first.A.Y, first.B.Y), math.Max(second.A.Y, second.B.Y))
 	}
@@ -734,7 +734,7 @@ func boundaryOverlap(first, second segment, parentKind Kind) (float64, float64) 
 }
 
 func routingBoundary(child *placement, side Side) *boundaryAccess {
-	if child.Element.Kind == KindNode {
+	if child.element.kind == kindNode {
 		// Node boundaries must remain route endpoints, never transit junctions.
 		return nil
 	}
@@ -745,9 +745,9 @@ func routingBoundary(child *placement, side Side) *boundaryAccess {
 	return &boundaryAccess{points: boundaryPortals(child, side)}
 }
 
-func boundaryCoordinates(access *boundaryAccess, segments []segment, parentKind Kind) []float64 {
+func boundaryCoordinates(access *boundaryAccess, segments []segment, parentKind kind) []float64 {
 	coordinate := func(p point) float64 {
-		if parentKind == KindHBox {
+		if parentKind == kindHBox {
 			return p.Y
 		}
 		return p.X
@@ -769,17 +769,17 @@ func boundaryCoordinates(access *boundaryAccess, segments []segment, parentKind 
 	return result
 }
 
-func boundaryPoint(access *boundaryAccess, coordinate float64, parentKind Kind) (point, bool) {
+func boundaryPoint(access *boundaryAccess, coordinate float64, parentKind kind) (point, bool) {
 	if access.line != nil {
 		candidate := point{X: coordinate, Y: access.line.A.Y}
-		if parentKind == KindHBox {
+		if parentKind == kindHBox {
 			candidate = point{X: access.line.A.X, Y: coordinate}
 		}
 		return candidate, pointOnSegment(candidate, *access.line)
 	}
 	for _, p := range access.points {
 		value := p.X
-		if parentKind == KindHBox {
+		if parentKind == kindHBox {
 			value = p.Y
 		}
 		if sameCoordinate(value, coordinate) {
@@ -823,23 +823,23 @@ func mergeConnectorDomain(domains map[string]connectorDomain, candidate connecto
 // addHierarchySegments connects child boundary portals to the channels owned by
 // each parent and records node portals as legal endpoints.
 func addHierarchySegments(parent *placement, segments *[]segment, ports map[string]map[Side]point, connectors map[string]connectorSpec, domains map[string]connectorDomain) {
-	if parent.Element.Kind == KindNode {
+	if parent.element.kind == kindNode {
 		return
 	}
 	// A riser connects every exposed child portal to each channel owned by the
 	// parent. Recursing builds a connected channel hierarchy without allowing
 	// the router to cross node interiors arbitrarily.
 	for _, child := range parent.Children {
-		if parent.Element.Kind == KindHBox {
+		if parent.element.kind == kindHBox {
 			for _, side := range []Side{North, South} {
 				parentChannel := parent.Channels[side]
 				portals := hierarchyPortals(child, side)
 				for portalIndex, portal := range portals {
 					destination := point{X: portal.X, Y: parentChannel.A.Y}
 					resource, domain := hierarchyRiserResource(child, parentChannel, side, portalIndex, portal, connectors, domains)
-					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.Element), kind: segmentRiser})
-					if child.Element.Kind == KindNode {
-						setPort(ports, child.Element.ID, side, portal.point)
+					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.element), kind: segmentRiser})
+					if child.element.kind == kindNode {
+						setPort(ports, child.element.ID, side, portal.point)
 					}
 				}
 			}
@@ -850,9 +850,9 @@ func addHierarchySegments(parent *placement, segments *[]segment, ports map[stri
 				for portalIndex, portal := range portals {
 					destination := point{X: parentChannel.A.X, Y: portal.Y}
 					resource, domain := hierarchyRiserResource(child, parentChannel, side, portalIndex, portal, connectors, domains)
-					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.Element), kind: segmentRiser})
-					if child.Element.Kind == KindNode {
-						setPort(ports, child.Element.ID, side, portal.point)
+					*segments = append(*segments, segment{A: portal.point, B: destination, resource: resource, domain: domain, region: routingRegionID(child.element), kind: segmentRiser})
+					if child.element.kind == kindNode {
+						setPort(ports, child.element.ID, side, portal.point)
 					}
 				}
 			}
@@ -864,23 +864,23 @@ func addHierarchySegments(parent *placement, segments *[]segment, ports map[stri
 func hierarchyRiserResource(child *placement, parentChannel *channel, side Side, portalIndex int, portal hierarchyPortal, connectors map[string]connectorSpec, domains map[string]connectorDomain) (string, string) {
 	// Node access legs are adjusted to exact endpoint ports later. Only
 	// container-to-parent transitions need shared connector allocation.
-	if child.Element.Kind == KindNode {
+	if child.element.kind == kindNode {
 		return "", ""
 	}
 	if portal.continuation != "" {
 		return portal.continuation, portal.continuation
 	}
-	id := riserID(child.Element.ID, side, portalIndex)
+	id := riserID(child.element.ID, side, portalIndex)
 	childChannel := child.Channels[side]
 	low, high := connectorOverlap(childChannel, parentChannel)
 	horizontal := side == West || side == East
 	connectors[id] = connectorSpec{
-		ResourceID: id, DomainID: id, Kind: connectorHierarchy,
+		ResourceID: id, DomainID: id, kind: connectorHierarchy,
 		Horizontal: horizontal, Low: low, High: high,
 	}
 	domains[id] = connectorDomain{
-		ID: id, Kind: connectorHierarchy, Horizontal: horizontal,
-		Low: low, High: high, ChildID: child.Element.ID, Side: side,
+		ID: id, kind: connectorHierarchy, Horizontal: horizontal,
+		Low: low, High: high, ChildID: child.element.ID, Side: side,
 	}
 	return id, id
 }
@@ -895,7 +895,7 @@ func connectorOverlap(first, second *channel) (float64, float64) {
 }
 
 func hierarchyPortals(child *placement, side Side) []hierarchyPortal {
-	if child.Element.Kind == KindNode {
+	if child.element.kind == kindNode {
 		points := boundaryPortals(child, side)
 		return []hierarchyPortal{{point: points[0]}}
 	}
@@ -942,7 +942,7 @@ func setPort(ports map[string]map[Side]point, nodeID string, side Side, p point)
 // boundaryPortals returns the points through which a child can meet a parent
 // channel on side.
 func boundaryPortals(child *placement, side Side) []point {
-	if child.Element.Kind == KindNode {
+	if child.element.kind == kindNode {
 		center := child.Rect.center()
 		switch side {
 		case North:

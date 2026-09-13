@@ -50,6 +50,34 @@ go run ./cmd/boxz -debug -o diagram.svg examples/basic.boxz
 
 Debug output changes only the visualization, not layout or routing.
 
+## Use it as a Go library
+
+Parsing produces an opaque, valid document. Applications can inspect its nodes
+and edges, replace the ordered edge set atomically, and then render and persist
+the same in-memory document—formatting and reparsing are not part of rendering.
+
+```go
+doc, err := boxz.ParseString("view.boxz", source)
+if err != nil {
+    return err
+}
+
+edges := doc.Edges()
+edges = append(edges, boxz.Edge{From: "api", To: "database"})
+doc, err = doc.WithEdges(edges)
+if err != nil {
+    return err
+}
+
+if err := boxz.RenderSVG(svgOutput, doc); err != nil {
+    return err
+}
+return boxz.Format(sourceOutput, doc)
+```
+
+See [Library API](docs/library.md) for the document lifecycle and ownership
+model.
+
 ## Documentation
 
 - [Concepts](docs/concepts.md): the high-level model for authored node layout,
@@ -62,6 +90,8 @@ Debug output changes only the visualization, not layout or routing.
   label strips, alignment, and automatic placement.
 - [Route refinement](docs/route-refinement.md): deterministic local cleanup of
   exact edge polylines after routing.
+- [Library API](docs/library.md): embedding Boxz, transforming edge selections,
+  and persisting self-contained diagram views.
 - [Architecture](docs/architecture.md): layout and routing internals, phase
   boundaries, and invariants.
 - [Visual routing gallery](examples/gallery/README.md): focused examples for

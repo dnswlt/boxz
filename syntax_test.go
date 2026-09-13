@@ -10,20 +10,20 @@ func TestParsePreservesOrderAndDefaultsTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Root.ID != "root" || doc.Root.Kind != KindVBox {
-		t.Fatalf("unexpected root: %#v", doc.Root)
+	if doc.root.ID != "root" || doc.root.kind != kindVBox {
+		t.Fatalf("unexpected root: %#v", doc.root)
 	}
-	if got := doc.Root.Children[0].ID; got != "services" {
+	if got := doc.root.Children[0].ID; got != "services" {
 		t.Fatalf("first child = %q, want services", got)
 	}
-	if got := doc.Root.Children[0].Children[1].ID; got != "api" {
+	if got := doc.root.Children[0].Children[1].ID; got != "api" {
 		t.Fatalf("second hbox child = %q, want api", got)
 	}
-	if got := doc.Root.Children[1].Title; got != "database" {
+	if got := doc.root.Children[1].Title; got != "database" {
 		t.Fatalf("default title = %q, want database", got)
 	}
-	if len(doc.Edges) != 2 || doc.Edges[0].From != "client" || doc.Edges[1].From != "api" {
-		t.Fatalf("edges = %#v, want source order preserved", doc.Edges)
+	if len(doc.edges) != 2 || doc.edges[0].From != "client" || doc.edges[1].From != "api" {
+		t.Fatalf("edges = %#v, want source order preserved", doc.edges)
 	}
 }
 
@@ -35,11 +35,11 @@ edges { a:N -> b:S }`
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Edges[0].FromSide == nil || *doc.Edges[0].FromSide != North {
-		t.Fatalf("source side = %#v, want N", doc.Edges[0].FromSide)
+	if doc.edges[0].FromSide == nil || *doc.edges[0].FromSide != North {
+		t.Fatalf("source side = %#v, want N", doc.edges[0].FromSide)
 	}
-	if doc.Edges[0].ToSide == nil || *doc.Edges[0].ToSide != South {
-		t.Fatalf("target side = %#v, want S", doc.Edges[0].ToSide)
+	if doc.edges[0].ToSide == nil || *doc.edges[0].ToSide != South {
+		t.Fatalf("target side = %#v, want S", doc.edges[0].ToSide)
 	}
 }
 
@@ -49,8 +49,8 @@ edges {}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Edges) != 0 {
-		t.Fatalf("edges = %#v, want none", doc.Edges)
+	if len(doc.edges) != 0 {
+		t.Fatalf("edges = %#v, want none", doc.edges)
 	}
 }
 
@@ -69,13 +69,13 @@ hbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := doc.Root.Springs, []int{2, 1, 2}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	if got, want := doc.root.Springs, []int{2, 1, 2}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("springs = %v, want %v", got, want)
 	}
-	if !doc.Root.Children[0].NodeAttributes.Spring {
+	if !doc.root.Children[0].nodeAttributes.Spring {
 		t.Fatal("bare spring attribute did not enable node growth")
 	}
-	if doc.Root.Children[1].NodeAttributes.Spring {
+	if doc.root.Children[1].nodeAttributes.Spring {
 		t.Fatal("spring = false enabled node growth")
 	}
 }
@@ -93,23 +93,23 @@ vbox root "System" [labelAlign = center] {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Root.Title != "System" || doc.Root.ContainerAttributes.LabelAlign != LabelAlignCenter {
-		t.Fatalf("root title/attributes = %q/%q, want System/center", doc.Root.Title, doc.Root.ContainerAttributes.LabelAlign)
+	if doc.root.Title != "System" || doc.root.containerAttributes.LabelAlign != labelAlignCenter {
+		t.Fatalf("root title/attributes = %q/%q, want System/center", doc.root.Title, doc.root.containerAttributes.LabelAlign)
 	}
-	if !doc.Root.ContainerAttributes.Bounded {
+	if !doc.root.containerAttributes.Bounded {
 		t.Fatal("titled root did not default to bounded")
 	}
-	services := doc.Root.Children[0]
-	if services.Title != "Services" || services.ContainerAttributes.LabelAlign != LabelAlignRight {
-		t.Fatalf("services title/attributes = %q/%q, want Services/right", services.Title, services.ContainerAttributes.LabelAlign)
+	services := doc.root.Children[0]
+	if services.Title != "Services" || services.containerAttributes.LabelAlign != labelAlignRight {
+		t.Fatalf("services title/attributes = %q/%q, want Services/right", services.Title, services.containerAttributes.LabelAlign)
 	}
-	if got := doc.Root.Children[1].ContainerAttributes.LabelAlign; got != LabelAlignAuto {
+	if got := doc.root.Children[1].containerAttributes.LabelAlign; got != labelAlignAuto {
 		t.Fatalf("explicit automatic alignment = %q, want auto", got)
 	}
-	if doc.Root.Children[1].ContainerAttributes.Bounded {
+	if doc.root.Children[1].containerAttributes.Bounded {
 		t.Fatal("bounded = false did not override the titled default")
 	}
-	if !doc.Root.Children[2].ContainerAttributes.Bounded {
+	if !doc.root.Children[2].containerAttributes.Bounded {
 		t.Fatal("bare bounded attribute did not bound an untitled container")
 	}
 }
@@ -188,21 +188,21 @@ func TestParseQuotedIdentifiers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Root.ID != "system:core" {
-		t.Errorf("root ID = %q, want system:core", doc.Root.ID)
+	if doc.root.ID != "system:core" {
+		t.Errorf("root ID = %q, want system:core", doc.root.ID)
 	}
-	api := doc.Root.Children[0]
+	api := doc.root.Children[0]
 	if api.ID != "api-server" || api.Title != "api-server" {
 		t.Errorf("node = %q titled %q, want api-server for both", api.ID, api.Title)
 	}
-	if got := doc.Root.Children[1].ID; got != `C:\tmp` {
+	if got := doc.root.Children[1].ID; got != `C:\tmp` {
 		t.Errorf("node ID = %q, want the backslash taken literally", got)
 	}
-	first, second := doc.Edges[0], doc.Edges[1]
+	first, second := doc.edges[0], doc.edges[1]
 	if first.From != "api-server" || first.FromSide == nil || *first.FromSide != South || first.To != `C:\tmp` {
 		t.Errorf("first edge = %q:%v -> %q", first.From, first.FromSide, first.To)
 	}
-	if got := doc.Root.Children[3].ID; got != "stra\u00dfe" {
+	if got := doc.root.Children[3].ID; got != "stra\u00dfe" {
 		t.Errorf("node ID = %q, want non-ASCII letters accepted", got)
 	}
 	if second.To != "db" {

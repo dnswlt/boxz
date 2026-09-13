@@ -5,10 +5,10 @@ import (
 )
 
 func TestRouteRefinementRemovesSafeLaneShoulder(t *testing.T) {
-	from := &placement{Element: &Element{Kind: KindNode, ID: "from"}, Rect: rect{X: 140, Y: 40, W: 40, H: 20}}
-	to := &placement{Element: &Element{Kind: KindNode, ID: "to"}, Rect: rect{X: 80, Y: 120, W: 40, H: 20}}
+	from := &placement{element: &element{kind: kindNode, ID: "from"}, Rect: rect{X: 140, Y: 40, W: 40, H: 20}}
+	to := &placement{element: &element{kind: kindNode, ID: "to"}, Rect: rect{X: 80, Y: 120, W: 40, H: 20}}
 	l := &layout{
-		Root: &placement{Element: &Element{Kind: KindVBox, ID: "root"}, Children: []*placement{from, to}},
+		Root: &placement{element: &element{kind: kindVBox, ID: "root"}, Children: []*placement{from, to}},
 		ByID: map[string]*placement{"from": from, "to": to},
 	}
 	routes := &routeResult{Edges: []*routedEdge{
@@ -22,12 +22,12 @@ func TestRouteRefinementRemovesSafeLaneShoulder(t *testing.T) {
 		},
 	}}
 
-	refineDisplayRoutes(l, routes, DefaultConfig())
+	refineDisplayRoutes(l, routes, defaultConfig())
 	want := []point{{X: 160, Y: 60}, {X: 160, Y: 100}, {X: 100, Y: 100}, {X: 100, Y: 120}}
 	if got := routes.Edges[1].Display; !samePolyline(got, want) {
 		t.Fatalf("refined route = %v, want %v", got, want)
 	}
-	refineDisplayRoutes(l, routes, DefaultConfig())
+	refineDisplayRoutes(l, routes, defaultConfig())
 	if got := routes.Edges[1].Display; !samePolyline(got, want) {
 		t.Fatalf("second refinement changed route to %v, want idempotent %v", got, want)
 	}

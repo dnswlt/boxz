@@ -26,15 +26,15 @@ func TestGalleryAvoidsNodeInteriors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			l, routes, ports, err := solve(doc, DefaultConfig())
+			l, routes, ports, err := solve(doc, defaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertSolvedRouteMetadata(t, routes)
 			assertNoNodeRectOverlaps(t, l)
-			assertRoutesAvoidOtherNodes(t, l, routes, ports, DefaultConfig())
-			assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
-			assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+			assertRoutesAvoidOtherNodes(t, l, routes, ports, defaultConfig())
+			assertRoutesMeetPortsCleanly(t, l, routes, ports, defaultConfig())
+			assertNoDisplayRouteOverlaps(t, routes, ports, defaultConfig(), 1)
 		})
 	}
 }
@@ -70,10 +70,10 @@ func TestRenderSVGIsDeterministicAndOrthogonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	var first, second bytes.Buffer
-	if err := RenderSVG(&first, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&first, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderSVG(&second, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&second, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	if first.String() != second.String() {
@@ -89,7 +89,7 @@ func TestRenderSVGIsDeterministicAndOrthogonal(t *testing.T) {
 		t.Fatal("normal rendering contains debug geometry")
 	}
 
-	debugConfig := DefaultConfig()
+	debugConfig := defaultConfig()
 	debugConfig.Debug = true
 	var debug bytes.Buffer
 	if err := RenderSVG(&debug, doc, debugConfig); err != nil {
@@ -143,7 +143,7 @@ edges {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())

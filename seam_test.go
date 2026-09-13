@@ -18,14 +18,14 @@ edges { n5 -> n3 n2 -> n1 n5 -> n2 n3 -> n6 n3 -> n6 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, routes, ports, err := solve(doc, DefaultConfig())
+	l, routes, ports, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var sharedConnector string
 	for domain, spec := range routes.Domains {
-		if spec.Kind == connectorHierarchy && len(routes.ConnectorUses[domain]) > 1 {
+		if spec.kind == connectorHierarchy && len(routes.ConnectorUses[domain]) > 1 {
 			sharedConnector = domain
 			break
 		}
@@ -52,8 +52,8 @@ edges { n5 -> n3 n2 -> n1 n5 -> n2 n3 -> n6 n3 -> n6 }
 	if len(coordinates) != len(routes.ConnectorUses[sharedConnector]) {
 		t.Fatalf("shared connector %q coordinates = %v, want %d distinct tracks", sharedConnector, coordinates, len(routes.ConnectorUses[sharedConnector]))
 	}
-	assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
-	assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+	assertRoutesMeetPortsCleanly(t, l, routes, ports, defaultConfig())
+	assertNoDisplayRouteOverlaps(t, routes, ports, defaultConfig(), 1)
 }
 
 func TestDirectSeamAndOuterRouteShareConnectorAllocation(t *testing.T) {
@@ -89,7 +89,7 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, routes, ports, err := solve(doc, DefaultConfig())
+	l, routes, ports, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +115,8 @@ edges {
 	if len(coordinates) != 2 {
 		t.Fatalf("domain %q coordinates = %v, want two allocated tracks", domain, coordinates)
 	}
-	assertRoutesMeetPortsCleanly(t, l, routes, ports, DefaultConfig())
-	assertNoDisplayRouteOverlaps(t, routes, ports, DefaultConfig(), 1)
+	assertRoutesMeetPortsCleanly(t, l, routes, ports, defaultConfig())
+	assertNoDisplayRouteOverlaps(t, routes, ports, defaultConfig(), 1)
 }
 
 func TestSeamChannelLanesDoNotOverlapDirectSeamTracks(t *testing.T) {
@@ -135,7 +135,7 @@ edges {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
@@ -168,7 +168,7 @@ edges {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
@@ -220,22 +220,22 @@ edges {
 			if err != nil {
 				t.Fatal(err)
 			}
-			l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+			l, err := buildLayout(doc, defaultConfig(), nil, plan)
 			if err != nil {
 				t.Fatal(err)
 			}
-			routes, err := routeDocument(doc, l, plan, DefaultConfig())
+			routes, err := routeDocument(doc, l, plan, defaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
-			grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), DefaultConfig())
+			grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), defaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !grew {
 				t.Fatal("cyclic seam did not request additional dogleg tracks")
 			}
-			for edgeIndex := range doc.Edges {
+			for edgeIndex := range doc.edges {
 				spec := plan.Seams[edgeIndex]
 				if spec.TrackCount != 4 || spec.FirstTrack == spec.SecondTrack {
 					t.Fatalf("edge %d seam = %#v, want two-bank dogleg in four tracks", edgeIndex, spec)
@@ -243,7 +243,7 @@ edges {
 			}
 
 			var output bytes.Buffer
-			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+			if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 				t.Fatal(err)
 			}
 			assertOrthogonalPaths(t, output.String())
@@ -269,15 +269,15 @@ edges { a -> b }
 	}
 	const retained = 3
 	plan.SeamTrackCount[seamID("root", 0)] = retained
-	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	l, err := buildLayout(doc, defaultConfig(), nil, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	routes, err := routeDocument(doc, l, plan, DefaultConfig())
+	routes, err := routeDocument(doc, l, plan, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), DefaultConfig())
+	grew, err := assignSeamTracks(doc, l, plan, allocatePorts(l, routes), defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ edges {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
@@ -359,7 +359,7 @@ edges {
 				t.Fatal(err)
 			}
 			var output bytes.Buffer
-			if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+			if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 				t.Fatal(err)
 			}
 			assertOrthogonalPaths(t, output.String())

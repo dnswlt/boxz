@@ -24,7 +24,7 @@ func TestContainerLabelReservesOnlyHeight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	plain, err := buildLayout(untitled, cfg, nil, planUntitled)
 	if err != nil {
 		t.Fatal(err)
@@ -47,20 +47,20 @@ func TestContainerLabelReservesOnlyHeight(t *testing.T) {
 }
 
 func TestBuildLayoutRejectsMalformedSpringSlots(t *testing.T) {
-	child := &Element{Kind: KindNode, ID: "child", Title: "child"}
-	root := &Element{
-		Kind:     KindHBox,
+	child := &element{kind: kindNode, ID: "child", Title: "child"}
+	root := &element{
+		kind:     kindHBox,
 		ID:       "root",
-		Children: []*Element{child},
+		Children: []*element{child},
 		Springs:  []int{0},
 	}
 	child.Parent = root
-	doc := &Document{Root: root}
+	doc := &Document{root: root}
 	plan, err := buildRoutingPlan(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = buildLayout(doc, DefaultConfig(), nil, plan)
+	_, err = buildLayout(doc, defaultConfig(), nil, plan)
 	if err == nil || !strings.Contains(err.Error(), "has 1 spring slots; want 2") {
 		t.Fatalf("error = %v, want malformed spring-slot diagnostic", err)
 	}
@@ -87,12 +87,12 @@ vbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	l, err := buildLayout(doc, defaultConfig(), nil, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
-	baseGap := seamBand(DefaultConfig(), 0)
+	baseGap := seamBand(defaultConfig(), 0)
 	actualGap := b.X - (a.X + a.W)
 	nodeGrowth := b.W - a.W
 	gapGrowth := actualGap - baseGap
@@ -125,12 +125,12 @@ hbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	l, err := buildLayout(doc, defaultConfig(), nil, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
-	baseGap := seamBand(DefaultConfig(), 0)
+	baseGap := seamBand(defaultConfig(), 0)
 	actualGap := b.Y - (a.Y + a.H)
 	nodeGrowth := b.H - a.H
 	gapGrowth := actualGap - baseGap
@@ -153,13 +153,13 @@ vbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	l, err := buildLayout(doc, defaultConfig(), nil, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := l.ByID["a"].Rect
-	if abs(a.W-DefaultConfig().MinNodeWidth) > 1e-9 {
-		t.Fatalf("spring node width = %g, want unchanged cross-axis width %g", a.W, DefaultConfig().MinNodeWidth)
+	if abs(a.W-defaultConfig().MinNodeWidth) > 1e-9 {
+		t.Fatalf("spring node width = %g, want unchanged cross-axis width %g", a.W, defaultConfig().MinNodeWidth)
 	}
 }
 
@@ -179,7 +179,7 @@ vbox root {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := buildLayout(doc, DefaultConfig(), nil, plan)
+	l, err := buildLayout(doc, defaultConfig(), nil, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,16 +224,16 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, _, _, err := solve(doc, DefaultConfig())
+	l, _, _, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, b := l.ByID["a"].Rect, l.ByID["b"].Rect
-	if gap := b.X - (a.X + a.W); gap <= seamBand(DefaultConfig(), 0) {
+	if gap := b.X - (a.X + a.W); gap <= seamBand(defaultConfig(), 0) {
 		t.Fatalf("nested spring gap = %g, want more than its intrinsic seam width", gap)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
@@ -248,7 +248,7 @@ func TestHierarchyConnectorCapacityCanGrowNestedContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	const tracks = 30
 	l, err := buildLayout(doc, cfg, map[string]int{riserID("child", North, 0): tracks}, plan)
 	if err != nil {

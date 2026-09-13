@@ -7,9 +7,9 @@ import (
 )
 
 func TestAutomaticGroupLabelPlacementAvoidsRoutes(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultConfig()
 	root := &placement{
-		Element:    &Element{Kind: KindHBox, ID: "root", Title: "AAAA"},
+		element:    &element{kind: kindHBox, ID: "root", Title: "AAAA"},
 		LabelStrip: rect{X: 0, Y: 10, W: 100, H: cfg.LineHeight + 2*cfg.GroupLabelPaddingY},
 	}
 	routes := [][]point{{{X: 20, Y: 0}, {X: 20, Y: 100}}}
@@ -24,7 +24,7 @@ func TestAutomaticGroupLabelPlacementAvoidsRoutes(t *testing.T) {
 		t.Fatalf("automatic label crossing score = %d, want zero", score)
 	}
 
-	root.Element.ContainerAttributes.LabelAlign = LabelAlignCenter
+	root.element.containerAttributes.LabelAlign = labelAlignCenter
 	labels = placeGroupLabels(root, routes, cfg)
 	wantCenter := (root.LabelStrip.W - labels[0].rect.W) / 2
 	if labels[0].rect.X != wantCenter {
@@ -39,7 +39,7 @@ edges { a -> b }`)
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	svg := output.String()
@@ -69,7 +69,7 @@ edges { a:N -> c:N b -> c }`
 			t.Fatal(err)
 		}
 		var output bytes.Buffer
-		if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+		if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 			t.Fatal(err)
 		}
 		return output.String()

@@ -31,7 +31,7 @@ edges {
 	if got := plan.SeamTrackCount[seamID("root", 1)]; got != 2 {
 		t.Fatalf("seam lane count = %d, want 2", got)
 	}
-	_, _, ports, err := solve(doc, DefaultConfig())
+	_, _, ports, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ edges {
 		t.Fatalf("api -> exportService seam = %#v, want outer-channel route", seam)
 	}
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
@@ -98,7 +98,7 @@ edges {
 			currentX, _ := strconv.ParseFloat(coordinates[index][1], 64)
 			currentY, _ := strconv.ParseFloat(coordinates[index][2], 64)
 			length := abs(previousX-currentX) + abs(previousY-currentY)
-			if length < DefaultConfig().LaneSpacing {
+			if length < defaultConfig().LaneSpacing {
 				t.Fatalf("lane offset created a short interior jog in path %q", path[1])
 			}
 		}
@@ -128,14 +128,14 @@ edges {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, routes, ports, err := solve(doc, DefaultConfig())
+	_, routes, ports, err := solve(doc, defaultConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var points []point
 	for _, route := range routes.Edges {
 		if route.From == "e1" && route.To == "w3" {
-			points = displayRoute(route, routes, ports, DefaultConfig())
+			points = displayRoute(route, routes, ports, defaultConfig())
 			break
 		}
 	}
@@ -147,7 +147,7 @@ edges {
 	}
 
 	var output bytes.Buffer
-	if err := RenderSVG(&output, doc, DefaultConfig()); err != nil {
+	if err := RenderSVG(&output, doc, defaultConfig()); err != nil {
 		t.Fatal(err)
 	}
 	assertOrthogonalPaths(t, output.String())
