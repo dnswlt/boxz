@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -32,6 +33,9 @@ type Config struct {
 	// AvoidBinary overrides discovery of the boxz-avoid executable. Only
 	// consulted when EdgeRouter is RouterAvoid.
 	AvoidBinary string
+	// AvoidTimeout bounds routing with boxz-avoid; the router is killed when it
+	// expires. Zero means 30 seconds.
+	AvoidTimeout time.Duration
 }
 
 // DefaultConfig returns conservative dimensions suitable for the bundled SVG style.

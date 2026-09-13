@@ -11,6 +11,7 @@ package avoid
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Version is the protocol version this package speaks. The router rejects a
@@ -207,11 +209,21 @@ func FindBinary() (string, error) {
 type Client struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	stdout *bufio.Reader
+	stdout io.ReadCloser
+	reader *bufio.Reader
 
-	mu     sync.Mutex
-	closed bool
+	// mu serializes requests, since the pipes carry one exchange at a time.
+	mu sync.Mutex
+	// broken is set once the stream is unusable: after an I/O failure, an
+	// abandoned request, or Close. Guarded by mu.
+	broken error
+
+	closing   chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
+
+var errClosed = errors.New("avoid: client is closed")
 
 // Start launches the router. Pass an empty binary to use FindBinary. Router
 // diagnostics (libavoid writes some directly to stderr) go to stderr, or are
@@ -229,6 +241,8 @@ func Start(binary string, stderr io.Writer) (*Client, error) {
 	}
 	cmd := exec.Command(binary)
 	cmd.Stderr = stderr
+	// Bounds Wait when a descendant of the router keeps its pipes open.
+	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("avoid: stdin pipe: %w", err)
@@ -240,19 +254,25 @@ func Start(binary string, stderr io.Writer) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("avoid: start %s: %w", binary, err)
 	}
-	// The reader must be large enough for one whole response line; diagrams
-	// with many edges produce long ones.
-	return &Client{cmd: cmd, stdin: stdin, stdout: bufio.NewReaderSize(stdout, 1<<20)}, nil
+	return &Client{
+		cmd:    cmd,
+		stdin:  stdin,
+		stdout: stdout,
+		// Large enough for one whole response line from a big diagram.
+		reader:  bufio.NewReaderSize(stdout, 1<<20),
+		closing: make(chan struct{}),
+	}, nil
 }
 
-// Route sends one request and returns its response. A request the router
-// rejects comes back as an *Error, leaving the client usable.
-func (c *Client) Route(request *Request) (*Response, error) {
+// Route sends one request and waits for its response until ctx is done. A
+// request the router rejects comes back as an *Error and leaves the client
+// usable. If ctx ends first, Route kills the router, returns an error wrapping
+// ctx.Err(), and the client is unusable afterwards.
+func (c *Client) Route(ctx context.Context, request *Request) (*Response, error) {
 	if request.Version == 0 {
 		request.Version = Version
 	}
-	// The protocol is JSON Lines, so the encoded request must contain no
-	// newline. json.Marshal never emits one.
+	// JSON Lines: json.Marshal never emits a newline.
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("avoid: encode request: %w", err)
@@ -260,19 +280,57 @@ func (c *Client) Route(request *Request) (*Response, error) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
-		return nil, errors.New("avoid: client is closed")
+	if c.broken != nil {
+		return nil, c.broken
 	}
-	if _, err := c.stdin.Write(append(encoded, '\n')); err != nil {
-		return nil, fmt.Errorf("avoid: write request: %w", err)
+	select {
+	case <-c.closing:
+		return nil, errClosed
+	default:
 	}
-	line, err := c.stdout.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("avoid: read response: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("avoid: request not sent: %w", err)
+	}
+
+	type reply struct {
+		line []byte
+		err  error
+	}
+	replies := make(chan reply, 1)
+	go func() {
+		if _, err := c.stdin.Write(append(encoded, '\n')); err != nil {
+			replies <- reply{err: fmt.Errorf("avoid: write request: %w", err)}
+			return
+		}
+		line, err := c.reader.ReadBytes('\n')
+		if err != nil {
+			err = fmt.Errorf("avoid: read response: %w", err)
+		}
+		replies <- reply{line: line, err: err}
+	}()
+
+	var r reply
+	select {
+	case r = <-replies:
+	case <-ctx.Done():
+		c.abort()
+		<-replies
+		c.broken = fmt.Errorf("avoid: router killed: %w", ctx.Err())
+		return nil, c.broken
+	case <-c.closing:
+		c.abort()
+		<-replies
+		c.broken = errClosed
+		return nil, errClosed
+	}
+	if r.err != nil {
+		c.broken = r.err
+		return nil, r.err
 	}
 	var response Response
-	if err := json.Unmarshal(line, &response); err != nil {
-		return nil, fmt.Errorf("avoid: decode response: %w", err)
+	if err := json.Unmarshal(r.line, &response); err != nil {
+		c.broken = fmt.Errorf("avoid: decode response: %w", err)
+		return nil, c.broken
 	}
 	if response.Error != nil {
 		return &response, response.Error
@@ -280,21 +338,28 @@ func (c *Client) Route(request *Request) (*Response, error) {
 	return &response, nil
 }
 
-// Close shuts the router down by closing its stdin and waiting for it to exit.
+// abort kills the router and closes our pipe ends, so blocked I/O returns even
+// if a descendant of the router still holds the other ends.
+func (c *Client) abort() {
+	_ = c.cmd.Process.Kill()
+	_ = c.stdin.Close()
+	_ = c.stdout.Close()
+}
+
+// Close aborts any request in flight, closes the router's stdin, and waits for
+// it to exit.
 func (c *Client) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return nil
-	}
-	c.closed = true
-	if err := c.stdin.Close(); err != nil {
-		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
-		return fmt.Errorf("avoid: close stdin: %w", err)
-	}
-	if err := c.cmd.Wait(); err != nil {
-		return fmt.Errorf("avoid: router exited: %w", err)
-	}
-	return nil
+	c.closeOnce.Do(func() {
+		close(c.closing)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		wasBroken := c.broken != nil
+		c.broken = errClosed
+		_ = c.stdin.Close()
+		// A killed or failed router already reported its error from Route.
+		if err := c.cmd.Wait(); err != nil && !wasBroken {
+			c.closeErr = fmt.Errorf("avoid: router exited: %w", err)
+		}
+	})
+	return c.closeErr
 }

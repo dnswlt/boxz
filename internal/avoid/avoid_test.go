@@ -1,6 +1,7 @@
 package avoid
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -38,7 +39,7 @@ func ports(prefix string) []Port {
 // through south/north rather than by wrapping around.
 func TestRouterChoosesFacingSides(t *testing.T) {
 	client := newClient(t)
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID: "facing",
 		Obstacles: []Obstacle{
 			{ID: "a", Rect: Rect{X: 0, Y: 0, W: 100, H: 40}, Ports: ports("a")},
@@ -74,7 +75,7 @@ func TestExclusivePortsSeparateParallelEdges(t *testing.T) {
 		{ID: "n0", Side: North, Pos: 0.25},
 		{ID: "n1", Side: North, Pos: 0.75},
 	}
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID: "parallel",
 		Obstacles: []Obstacle{
 			{ID: "a", Rect: Rect{X: 0, Y: 0, W: 100, H: 40}, Ports: south},
@@ -104,7 +105,7 @@ func TestExclusivePortsSeparateParallelEdges(t *testing.T) {
 // a longer route.
 func TestPortSubsetConstrainsEndpoint(t *testing.T) {
 	client := newClient(t)
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID: "constrained",
 		Obstacles: []Obstacle{
 			{ID: "a", Rect: Rect{X: 0, Y: 0, W: 100, H: 40}, Ports: ports("a")},
@@ -128,7 +129,7 @@ func TestPortSubsetConstrainsEndpoint(t *testing.T) {
 func TestRouteAvoidsObstacle(t *testing.T) {
 	client := newClient(t)
 	blocker := Rect{X: 20, Y: 100, W: 60, H: 40}
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID: "avoid",
 		Obstacles: []Obstacle{
 			{ID: "a", Rect: Rect{X: 0, Y: 0, W: 100, H: 40}, Ports: ports("a")},
@@ -156,7 +157,7 @@ func TestRouteAvoidsObstacle(t *testing.T) {
 // so one bad diagram cannot poison a long-lived router.
 func TestRequestErrorKeepsClientUsable(t *testing.T) {
 	client := newClient(t)
-	_, err := client.Route(&Request{
+	_, err := client.Route(context.Background(), &Request{
 		ID:    "bad",
 		Edges: []Edge{{ID: "e0", From: Endpoint{Obstacle: "missing"}, To: Endpoint{Obstacle: "missing"}}},
 	})
@@ -168,7 +169,7 @@ func TestRequestErrorKeepsClientUsable(t *testing.T) {
 		t.Errorf("got code %q, want \"unknown_obstacle\"", routerError.Code)
 	}
 
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID:        "good",
 		Obstacles: []Obstacle{{ID: "a", Rect: Rect{X: 0, Y: 0, W: 10, H: 10}}},
 	})
@@ -199,12 +200,12 @@ func TestRoutingIsDeterministic(t *testing.T) {
 			},
 		}
 	}
-	first, err := client.Route(request())
+	first, err := client.Route(context.Background(), request())
 	if err != nil {
 		t.Fatalf("Route: %v", err)
 	}
 	for attempt := 0; attempt < 3; attempt++ {
-		next, err := client.Route(request())
+		next, err := client.Route(context.Background(), request())
 		if err != nil {
 			t.Fatalf("Route: %v", err)
 		}
@@ -221,7 +222,7 @@ func TestRoutingIsDeterministic(t *testing.T) {
 // rather than silently ignoring them.
 func TestClusterWarnsUnderOrthogonalRouting(t *testing.T) {
 	client := newClient(t)
-	response, err := client.Route(&Request{
+	response, err := client.Route(context.Background(), &Request{
 		ID:        "cluster",
 		Clusters:  []Cluster{{ID: "g", Rect: Rect{X: 150, Y: 60, W: 170, H: 220}}},
 		Obstacles: []Obstacle{{ID: "a", Rect: Rect{X: 0, Y: 100, W: 60, H: 40}}},

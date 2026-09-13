@@ -1,9 +1,12 @@
 package boxz
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/dnswlt/boxz/internal/avoid"
 )
@@ -19,6 +22,8 @@ const (
 	// experimental: see avoidrouter/README.md.
 	RouterAvoid RouterKind = "avoid"
 )
+
+const defaultAvoidTimeout = 30 * time.Second
 
 // solveWithAvoid replaces every routing phase after placement. Layout runs
 // once: the fixed point in solve only grows outer channel bands for boxz's own
@@ -38,7 +43,16 @@ func solveWithAvoid(doc *Document, cfg Config, plan *routingPlan) (*layout, *rou
 		return nil, nil, nil, err
 	}
 	defer client.Close()
-	response, err := client.Route(request)
+	timeout := cfg.AvoidTimeout
+	if timeout <= 0 {
+		timeout = defaultAvoidTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	response, err := client.Route(ctx, request)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, nil, nil, fmt.Errorf("boxz: avoid router did not finish within %s: %w", timeout, err)
+	}
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("boxz: avoid router: %w", err)
 	}

@@ -275,8 +275,12 @@ BOXZ_ROUTER=avoid ./scripts/render-gallery.sh
   per set, so a shared port gets coincident pins and exclusivity holds only
   within a class. Boxz can sidestep it with disjoint sets. No caller hits it.
 - Hyperedges, junctions, and non-rectangular obstacles are not exposed.
-- No timeout. A pathological diagram hangs the router; the Go side should own a
-  deadline.
+- The router has no timeout of its own. `Client.Route` takes a context and kills
+  the process when it ends; boxz bounds each render with `Config.AvoidTimeout`
+  (default 30s). libavoid's `shouldContinueTransactionWithProgress` hook is not
+  used: it is polled per connector and per phase, not inside one path search, so
+  it cannot bound a stall. The kill reaches only the router process, not
+  anything a wrapper script started.
 
 ## Go client
 
