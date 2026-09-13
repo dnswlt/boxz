@@ -158,6 +158,8 @@ general and keeps the router free of boxz's port conventions.
 
 `routes` is in request order, one entry per edge. `from`/`to` report the port
 libavoid chose, which the caller needs precisely because it did not choose it.
+`port` and `side` identify the pin attached to; `point` is the display endpoint,
+which nudging may have moved along the border away from that pin.
 
 An error response replaces `routes`:
 

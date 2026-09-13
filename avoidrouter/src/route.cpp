@@ -232,10 +232,11 @@ Response RouteRequest(const Request& request) {
 
   router.processTransaction();
 
-  // Report which port each end landed on by matching the route's terminal
-  // point against the obstacle's declared ports. libavoid does not hand back
-  // the pin it chose, and the terminal point is exactly the pin position.
-  auto describe = [&](const Endpoint& end, const Point& terminal) {
+  // Identify the chosen port by the pin libavoid attached to. Nudging can move
+  // the display endpoint along the border, but ConnEnd::position() reports the
+  // active pin, which stays where it was declared.
+  auto describe = [&](const Endpoint& end, const Avoid::ConnEnd& attached,
+                      const Point& terminal) {
     ResolvedEnd resolved;
     resolved.point = terminal;
     if (end.point.has_value()) {
@@ -247,9 +248,10 @@ Response RouteRequest(const Request& request) {
       return resolved;
     }
     const ObstacleState& state = it->second;
+    const Avoid::Point pin = attached.position();
     double best = 1e-6;
     for (size_t index = 0; index < state.port_points.size(); ++index) {
-      const double distance = DistanceSquared(state.port_points[index].second, terminal);
+      const double distance = DistanceSquared(state.port_points[index].second, Point{pin.x, pin.y});
       if (distance <= best) {
         best = distance;
         resolved.port = state.port_points[index].first;
@@ -271,8 +273,9 @@ Response RouteRequest(const Request& request) {
     if (route.points.empty()) {
       response.warnings.push_back("edge \"" + edge.id + "\": libavoid returned no route");
     } else {
-      route.from = describe(edge.from, route.points.front());
-      route.to = describe(edge.to, route.points.back());
+      const std::pair<Avoid::ConnEnd, Avoid::ConnEnd> ends = conns[index]->endpointConnEnds();
+      route.from = describe(edge.from, ends.first, route.points.front());
+      route.to = describe(edge.to, ends.second, route.points.back());
     }
     response.routes.push_back(std::move(route));
   }

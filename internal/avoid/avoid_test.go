@@ -2,6 +2,7 @@ package avoid
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -98,6 +99,57 @@ func TestExclusivePortsSeparateParallelEdges(t *testing.T) {
 	}
 	for _, route := range response.Routes {
 		assertOrthogonal(t, route)
+	}
+}
+
+// Shared pins get nudged apart along the border, so the display endpoints move
+// off the pin. Each end must still report the port it attached to.
+func TestNudgedEndpointsKeepPortMetadata(t *testing.T) {
+	client := newClient(t)
+	shared := false
+	hub := Obstacle{ID: "hub", Rect: Rect{X: 200, Y: 0, W: 120, H: 40}, ExclusivePorts: &shared,
+		Ports: []Port{{ID: "s0", Side: South, Pos: 0.25}, {ID: "s1", Side: South, Pos: 0.5}, {ID: "s2", Side: South, Pos: 0.75}}}
+	request := &Request{ID: "nudged", Obstacles: []Obstacle{hub}}
+	for i := 0; i < 3; i++ {
+		target := fmt.Sprintf("t%d", i)
+		request.Obstacles = append(request.Obstacles, Obstacle{
+			ID: target, Rect: Rect{X: 60 + float64(i)*130, Y: 300, W: 90, H: 40},
+			Ports: []Port{{ID: "n", Side: North, Pos: 0.5}}})
+		request.Edges = append(request.Edges, Edge{
+			ID: fmt.Sprintf("e%d", i), From: Endpoint{Obstacle: "hub"}, To: Endpoint{Obstacle: target}})
+	}
+	response, err := client.Route(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	pins := make(map[string]Point)
+	for _, port := range hub.Ports {
+		pins[port.ID] = Point{X: hub.Rect.X + hub.Rect.W*port.Pos, Y: hub.Rect.Y + hub.Rect.H}
+	}
+	starts := make(map[float64]bool)
+	nudged := 0
+	for _, route := range response.Routes {
+		starts[route.Points[0].X] = true
+		pin, ok := pins[route.From.Port]
+		if !ok || route.From.Side != South {
+			t.Errorf("edge %s left from %v with port %q side %q, want a south port",
+				route.ID, route.Points[0], route.From.Port, route.From.Side)
+			continue
+		}
+		if route.From.Point != route.Points[0] {
+			t.Errorf("edge %s reports point %v, want its display endpoint %v",
+				route.ID, route.From.Point, route.Points[0])
+		}
+		if route.Points[0] != pin {
+			nudged++
+		}
+	}
+	if len(starts) != len(response.Routes) {
+		t.Errorf("display endpoints %v coincide", starts)
+	}
+	// Distinct endpoints alone could come from three unnudged pins.
+	if nudged == 0 {
+		t.Fatal("every display endpoint sits on its reported pin; the test no longer covers nudging")
 	}
 }
 
