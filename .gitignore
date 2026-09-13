@@ -1,6 +1,7 @@
 # Generated output
 /.gallery/
 /.gallery-compare/
+/examples/*.svg
 /boxz
 *.test
 *.out
