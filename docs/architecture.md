@@ -386,6 +386,8 @@ carry `data-domain`.
 - Graph vertices use exact point identity. Derived intersections must reuse
   coordinates from stored geometry rather than recomputing equivalent floats.
 
-Tests in `boxz_test.go` exercise these invariants, especially recursive
-frontiers, deterministic output, orthogonality, node separation, route avoidance
-of unrelated node interiors, and the absence of lane-offset jogs.
+Tests exercise these invariants, especially recursive frontiers, deterministic
+output, orthogonality, node separation, route avoidance of unrelated node
+interiors, and the absence of lane-offset jogs. The tests for `X.go` live in
+`X_test.go`; `boxz_test.go` holds whole-program tests over the gallery and
+rendering, and `helpers_test.go` the assertions they share.
